@@ -4,6 +4,34 @@ Arduino Uno Q Fly Car Project
 
 ## Preparation
 
+### Release から取る
+
+git には元表も切り出し結果も入っていない。Release [data-2026-10-05](https://github.com/hamling-ling/fly-car/releases/tag/data-2026-10-05) に置いてある。元表は MaleCNS v1.0 のコピーで、ライセンスは CC BY 4.0 である。正本は https://male-cns.janelia.org/download にある。
+
+リポジトリ直下で次を実行すると、`data/malecns/` に元表と切り出し結果が揃う。
+
+```bash
+rel=https://github.com/hamling-ling/fly-car/releases/download/data-2026-10-05
+mkdir -p data/malecns
+cd data/malecns
+
+curl -L -C - -O "$rel/body-annotations-male-cns-v1.0-minconf-0.5.feather"
+curl -L -C - -O "$rel/body-neurotransmitters-male-cns-v1.0.feather"
+curl -L -C - -O "$rel/connectome-weights-male-cns-v1.0-minconf-0.5.feather"
+curl -L -C - -O "$rel/gf_loom.json"
+curl -L -C - -O "$rel/gf-loom.tar.gz"
+curl -L -C - -O "$rel/steer-dna02.tar.gz"
+curl -L -C - -O "$rel/SHA256SUMS"
+sha256sum -c SHA256SUMS
+
+tar -xzf gf-loom.tar.gz
+tar -xzf steer-dna02.tar.gz
+```
+
+`gf-loom.tar.gz` は巨大線維の loom 回路、`steer-dna02.tar.gz` は DNa02 の走性回路である。ノートだけ回すなら、この 2 つを展開すればよい。結合表は約 1 GB ある。
+
+Janelia のバケットと NeuPrint から取り直す手順は以下である。
+
 ### NeuPrint の Token を入手
 
 https://neuprint.janelia.org/ にアクセスし google アカウント連携などでログインする。
