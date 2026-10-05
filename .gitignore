@@ -218,3 +218,7 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# MaleCNS downloads and extracts. See README.
+data/malecns/*
+!data/malecns/.gitkeep
