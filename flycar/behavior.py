@@ -1,27 +1,26 @@
 """Half-screen red and blue counts to two wheel speeds.
 
 Counts run from 0 to 1 and are the filled fraction of each half of the
-frame. Left and right are the two halves. A color is "in front" when both
-halves are filled. Position inside one half does not matter. Coverage that
-falls outside the frame simply lowers that half's count. Counts below
-``COUNT_FLOOR`` are read as empty. That floor is tuned when the camera is
-connected.
+frame. Left and right are the two halves. Position inside one half does not
+matter. Coverage that falls outside the frame simply lowers that half's
+count. Counts below ``COUNT_FLOOR`` are read as empty. That floor is tuned
+when the camera is connected.
 
-Translation has three modes.
+Each count is a current into one LIF cell. DNa02 takes red, DNp01 takes
+blue. The wheels read the firing rates directly:
 
-- stop: both wheels at rest. Blue fills both halves, red fills both halves
-  while blue is not confined to one side, or neither color is in the frame.
-- spin: turn in place, away from a blue that fills only one half, when red
-  is absent.
-- cruise: cruise speed plus yaw. Any visible red that does not fill the
-  frame, and a one-sided blue while any red is still visible.
+- forward speed is the red sum minus the blue sum, and it does not reverse
+- yaw is the red difference plus the blue difference. Positive yaw is a
+  left turn, so a right-hand red turns right and a right-hand blue turns left
 
-Yaw matches ``notebooks/chemotaxis_sim.ipynb``. A positive command turns
-right. On a frame whose larger blue count is at least ``BLUE_OVERRIDE``,
-DNa02 is dropped and the DNp01 difference is used. When red is absent, that
-DNp01 difference is kept until the blue count falls below ``COUNT_FLOOR``.
-Red counts as arrived only when both halves are at least ``RED_FILL``. A red
-that fills one half still arcs.
+Nothing is firing, so an empty frame and a subthreshold color both stop.
+Equal blue on both sides cancels yaw and subtracts from forward, which is a
+stop when blue outweighs red. One side of blue with no red has no forward
+term left, so the car spins in place.
+
+The one hand-written exception is a safety stop. When both red halves are
+at least ``RED_FILL``, both wheels are held at rest even though DNa02 is
+firing hard. A red that fills only one half still drives.
 """
 
 from __future__ import annotations
@@ -30,27 +29,33 @@ from dataclasses import dataclass
 
 import numpy as np
 
-# Membrane and readout. Same values as notebooks/chemotaxis_sim.ipynb.
+# Membrane time constants match notebooks/chemotaxis_sim.ipynb.
+# RED_REF does not. That notebook still divides red counts by 0.25.
 R_MAX = 80.0
 R_REF = 50.0
-RED_REF = 0.25
+# A half-count equal to this is current 1. Exactly 1 never spikes. 0.15 matches
+# COUNT_FLOOR, so a red the camera still counts can fire. The old 0.25 left
+# the front-scene red (about 0.19 a side) silent, and the rate law then had
+# nothing to drive the wheels with.
+RED_REF = 0.15
 TAU_MS = 5.0
 V_THRESHOLD = 1.0
 REFRAC_MS = 5.0
 DT = 0.001
 TAU_RATE_S = 0.100
-BLUE_OVERRIDE = 0.72
-RATE_SCALE = 100.0
-V_CRUISE = 0.15
-OMEGA_MAX = 1.6
 TRACK = 0.12
 
 # Counts. Independent of the synapse ratios above.
 RED_FILL = 0.75
-RED_PRESENT = 0.15
-# Half-frame counts below this are read as empty, before the other thresholds.
+# Half-frame counts below this are read as empty, before the currents.
 # Tune when the camera is connected.
 COUNT_FLOOR = 0.15
+
+# Front red 0.45/0.45 settles near 167 Hz a side. That sum is 0.20 m/s.
+# FORWARD / YAW is the turning radius while only one cell is firing, 0.25 m.
+# It stays above TRACK/2, so that arc keeps both wheels forward.
+FORWARD_PER_HZ = 0.0006
+YAW_PER_HZ = 0.0024
 
 
 def present_count(count: float) -> float:
@@ -98,52 +103,30 @@ def gf_current(blue_l: float, blue_r: float) -> tuple[float, float]:
     return (rate_l / R_REF, rate_r / R_REF)
 
 
-def yaw_command(
-    dna_l: float,
-    dna_r: float,
-    gf_l: float,
-    gf_r: float,
-    blue_l: float,
-    blue_r: float,
-    red_l: float,
-    red_r: float,
-) -> tuple[float, bool]:
-    """Positive command is a right turn. Blue above threshold drops DNa02.
+def red_fills_the_frame(red_l: float, red_r: float) -> bool:
+    """Safety stop. Both halves covered, whatever the cells are doing."""
+    return min(present_count(red_l), present_count(red_r)) >= RED_FILL
 
-    With no red, a blue that is still above ``COUNT_FLOOR`` keeps the DNp01
-    difference, even after it falls below ``BLUE_OVERRIDE``.
+
+def speed_and_yaw(dna_l: float, dna_r: float, gf_l: float, gf_r: float) -> tuple[float, float]:
+    """Forward speed in m/s and yaw in rad/s. Positive yaw turns left.
+
+    Forward is the red sum minus the blue sum, clipped so the car does not
+    reverse. Yaw adds the two left-right differences.
     """
-    blue_l = present_count(blue_l)
-    blue_r = present_count(blue_r)
-    red_l = present_count(red_l)
-    red_r = present_count(red_r)
-    blue_hi = max(blue_l, blue_r)
-    red_absent = max(red_l, red_r) == 0.0
-    if blue_hi >= BLUE_OVERRIDE or (red_absent and blue_hi > 0.0):
-        return gf_l - gf_r, True
-    return dna_r - dna_l, False
+    forward = (dna_l + dna_r) - (gf_l + gf_r)
+    yaw = (dna_l - dna_r) + (gf_r - gf_l)
+    speed = max(0.0, forward * FORWARD_PER_HZ)
+    omega = yaw * YAW_PER_HZ
+    return speed, omega
 
 
-def translation_mode(red_l: float, red_r: float, blue_l: float, blue_r: float) -> str:
-    """stop, spin, or cruise. Yaw is chosen separately."""
-    red_l = present_count(red_l)
-    red_r = present_count(red_r)
-    blue_l = present_count(blue_l)
-    blue_r = present_count(blue_r)
-    blue_hi = max(blue_l, blue_r)
-    blue_lo = min(blue_l, blue_r)
-    red_hi = max(red_l, red_r)
-    red_lo = min(red_l, red_r)
-    if blue_hi >= BLUE_OVERRIDE and blue_lo >= BLUE_OVERRIDE:
+def motion_mode(speed: float, v_left: float, v_right: float) -> str:
+    """Label the wheels after the command. The label does not choose it."""
+    if abs(v_left) < 1e-6 and abs(v_right) < 1e-6:
         return "stop"
-    if blue_hi >= BLUE_OVERRIDE:
-        if red_hi >= RED_PRESENT:
-            return "cruise"
+    if speed < 1e-6 and v_left * v_right < 0.0:
         return "spin"
-    if red_lo >= RED_FILL:
-        return "stop"
-    if red_hi == 0.0 and blue_hi == 0.0:
-        return "stop"
     return "cruise"
 
 
@@ -156,7 +139,6 @@ def wheels(omega: float, speed: float) -> tuple[float, float]:
 @dataclass
 class Step:
     mode: str
-    override: bool
     speed: float
     omega: float
     v_left: float
@@ -185,31 +167,23 @@ class Plant:
         self.gf_r.step(i_gf[1])
         self.dna_l.step(i_dna[0])
         self.dna_r.step(i_dna[1])
-        command, override = yaw_command(
-            self.dna_l.rate,
-            self.dna_r.rate,
-            self.gf_l.rate,
-            self.gf_r.rate,
-            blue_l,
-            blue_r,
-            red_l,
-            red_r,
-        )
-        mode = translation_mode(red_l, red_r, blue_l, blue_r)
-        if mode == "stop":
+        if red_fills_the_frame(red_l, red_r):
             speed = 0.0
             omega = 0.0
         else:
-            steer = float(np.clip(command / RATE_SCALE, -1.0, 1.0))
-            omega = -steer * OMEGA_MAX
-            speed = 0.0 if mode == "spin" else V_CRUISE
+            speed, omega = speed_and_yaw(
+                self.dna_l.rate,
+                self.dna_r.rate,
+                self.gf_l.rate,
+                self.gf_r.rate,
+            )
         v_left, v_right = wheels(omega, speed)
+        mode = motion_mode(speed, v_left, v_right)
         self.x += speed * float(np.cos(self.heading)) * DT
         self.y += speed * float(np.sin(self.heading)) * DT
         self.heading = float((self.heading + omega * DT + np.pi) % (2 * np.pi) - np.pi)
         return Step(
             mode=mode,
-            override=override,
             speed=speed,
             omega=omega,
             v_left=v_left,
