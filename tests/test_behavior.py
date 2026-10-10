@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import pytest
 
-from flycar.behavior import Hold, hold
+from flycar.behavior import COUNT_FLOOR, Hold, hold, yaw_command
 
 # Half-screen counts. The second number of each pair is the right half.
 FRONT_RED = (0.45, 0.45)
@@ -85,6 +85,35 @@ class TestStep1:
     def test_red_covering_the_view_stops(self) -> None:
         """赤が左右の画面の大部分を覆うと止まる。"""
         assert_stopped(show(FULL_RED, NO_BLUE))
+
+
+class TestNothing:
+    def test_nothing_in_view_stops(self) -> None:
+        """何も写っていないときは止まる。"""
+        assert_stopped(show(NO_RED, NO_BLUE))
+
+    def test_counts_below_the_floor_stop(self) -> None:
+        """COUNT_FLOOR 未満は空とみなして止まる。"""
+        faint = (COUNT_FLOOR - 0.01, 0.0)
+        assert_stopped(show(faint, faint))
+
+    def test_remaining_blue_keeps_the_yaw_when_red_is_absent(self) -> None:
+        """赤が無いあいだは、0.72 未満の青でも DNp01 の差を使う。"""
+        command, override = yaw_command(0.0, 0.0, 10.0, 40.0, 0.0, 0.50, 0.0, 0.0)
+        assert override
+        assert command == pytest.approx(10.0 - 40.0)
+
+    def test_weak_blue_does_not_override_a_visible_red(self) -> None:
+        """赤が写っているとき、0.72 未満の青は DNa02 を置き換えない。"""
+        command, override = yaw_command(5.0, 20.0, 10.0, 40.0, 0.0, 0.50, 0.40, 0.0)
+        assert not override
+        assert command == pytest.approx(20.0 - 5.0)
+
+    def test_red_at_the_floor_still_cruises(self) -> None:
+        """床ちょうど以上の赤は、片方だけでも前進する。"""
+        got = show((COUNT_FLOOR, 0.0), NO_BLUE)
+        assert_rolling(got)
+        assert got.omega == pytest.approx(0.0, abs=1e-9)
 
 
 class TestStep2:
