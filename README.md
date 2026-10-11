@@ -130,14 +130,14 @@ c & c \ge \theta
 \end{cases}
 $$
 
-赤は DNa02、青は DNp01。左右で 1 本ずつ、合わせて 4 本ある。赤の電流は、カウントが `RED_REF` $= 0.15$ のとき 1 になるように割る。青の電流は、同側の LC4 と LPLC2 を一つの率 $R_{\max} = 80\,\mathrm{Hz}$ にまとめたものを、参照 $R_{\mathrm{ref}} = 50\,\mathrm{Hz}$ で割る。
+赤は DNa02、青は DNp01。左右で 1 本ずつ、合わせて 4 本ある。どちらの電流も、半画面の占有が 0.15 のとき 1 になるように割る。占有は loom の拡大速度ではないので、青には $R_{\max}/R_{\mathrm{ref}}$ を掛けない。
 
 $$
 I^{\mathrm{DNa02}}_{L,R} = \tilde{c}^{\mathrm{red}}_{L,R} / 0.15
 $$
 
 $$
-I^{\mathrm{DNp01}}_{L,R} = \tilde{c}^{\mathrm{blue}}_{L,R} \times 80 / 50
+I^{\mathrm{DNp01}}_{L,R} = \tilde{c}^{\mathrm{blue}}_{L,R} / 0.15
 $$
 
 膜は電流入力の LIF で、時定数 $\tau = 5\,\mathrm{ms}$、閾値 1、不応期 5 ms、刻み $\Delta t = 1\,\mathrm{ms}$ である。
@@ -159,18 +159,18 @@ $$
 4 本の発火率から前進 $v$（m/s、前が正）とヨー $\omega$（rad/s、左が正）を同時に出す。モードを選ぶ分岐は無い。
 
 $$
-u = (r^{\mathrm{DNa02}}_L + r^{\mathrm{DNa02}}_R) - (r^{\mathrm{DNp01}}_L + r^{\mathrm{DNp01}}_R)
+u = (r^{\mathrm{DNa02}}_L + r^{\mathrm{DNa02}}_R) - 0.35\,(r^{\mathrm{DNp01}}_L + r^{\mathrm{DNp01}}_R)
 $$
 
 $$
-\psi = (r^{\mathrm{DNa02}}_L - r^{\mathrm{DNa02}}_R) + (r^{\mathrm{DNp01}}_R - r^{\mathrm{DNp01}}_L)
+\psi = 0.25\,(r^{\mathrm{DNa02}}_L - r^{\mathrm{DNa02}}_R) + 1.5\,(r^{\mathrm{DNp01}}_R - r^{\mathrm{DNp01}}_L)
 $$
 
 $$
 v = \max(0,\ 0.0006\, u), \qquad \omega = 0.0024\, \psi
 $$
 
-右の赤は $r^{\mathrm{DNa02}}_R$ を増やして右へ回る。右の青は $r^{\mathrm{DNp01}}_R$ を増やして左へ回る。青の和は前進を削る。負の $u$ は 0 にするので、後退はしない。片側だけが発火しているときの回転半径は $0.0006 / 0.0024 = 0.25\,\mathrm{m}$ である。
+右の赤は $r^{\mathrm{DNa02}}_R$ を増やして右へ回る。右の青は $r^{\mathrm{DNp01}}_R$ を増やして左へ回る。青の和は前進を削るが、係数 0.35 なので同じ発火率では赤の和が残る。ヨーでは青の差が赤の差の 6 倍なので、片側の青は、その回避で同じ半画面へ寄った赤より強く回る。負の $u$ は 0 にするので、後退はしない。赤の片側だけが発火しているときの回転半径は $0.0006 / (0.25 \times 0.0024) = 1\,\mathrm{m}$ である。
 
 例外が一つある。床を通したあと赤の左右がどちらも 0.75 以上なら、発火していても車輪を止める。
 

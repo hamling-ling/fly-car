@@ -60,7 +60,7 @@ def test_reference_red_starts_on_the_right_and_stops_centered():
     assert centered
     stops = [sample for sample in run.samples if sample.mode == "stop"]
     assert stops
-    assert stops[0].t == pytest.approx(7.22)
+    assert stops[0].t == pytest.approx(7.88)
     assert stops[0].red.left >= 0.75
     assert stops[0].red.right >= 0.75
     assert abs(stops[0].red.nx) < 0.1
@@ -86,11 +86,34 @@ def test_right_blue_only_spins_in_place_and_stops_with_blue_left():
     stops = [sample for sample in run.samples if sample.mode == "stop"]
     assert spins[0].t == pytest.approx(0.0)
     assert spins[0].omega > 0.0
-    assert stops[0].t == pytest.approx(2.02)
+    assert stops[0].t == pytest.approx(1.76)
     assert stops[0].x == pytest.approx(0.0, abs=1e-6)
     assert stops[0].y == pytest.approx(0.0, abs=1e-6)
-    assert stops[0].heading > 0.2
-    assert stops[0].blue.right > 0.4
+    assert stops[0].heading > 0.4
+    assert stops[0].blue.left == 0.0
+    assert stops[0].blue.right < 0.15
+
+
+def test_front_red_and_right_blue_passes_left_of_the_blue_and_stops():
+    run = simulate(
+        Scene(
+            red=Blob((1.30, 0.00), 0.12),
+            blue=Blob((0.45, -0.08), 0.10),
+            run_s=12.0,
+        )
+    )
+    dist = [((s.x - 0.45) ** 2 + (s.y + 0.08) ** 2) ** 0.5 for s in run.samples]
+    assert min(dist) > 0.16
+    assert max(s.y for s in run.samples) > 0.05
+    stops = [s for s in run.samples if s.mode == "stop"]
+    assert stops
+    assert stops[0].t == pytest.approx(8.88)
+    assert stops[0].red.left >= 0.75
+    assert stops[0].red.right >= 0.75
+    assert ((stops[0].x - 1.30) ** 2 + stops[0].y**2) ** 0.5 < 0.35
+    cruise = [s for s in run.samples if s.mode == "cruise"]
+    assert cruise
+    assert all(s.v_left > 0.0 and s.v_right > 0.0 for s in cruise)
 
 
 def test_left_red_turns_left_without_a_blue_sphere():

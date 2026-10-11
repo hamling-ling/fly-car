@@ -9,14 +9,22 @@ when the camera is connected.
 Each count is a current into one LIF cell. DNa02 takes red, DNp01 takes
 blue. The wheels read the firing rates directly:
 
-- forward speed is the red sum minus the blue sum, and it does not reverse
-- yaw is the red difference plus the blue difference. Positive yaw is a
-  left turn, so a right-hand red turns right and a right-hand blue turns left
+- forward speed is the red sum minus ``BLUE_FORWARD`` times the blue sum,
+  and it does not reverse
+- yaw is ``RED_YAW`` times the red difference plus ``BLUE_YAW`` times the
+  blue difference. Positive yaw is a left turn, so a right-hand red turns
+  right and a right-hand blue turns left
+
+``BLUE_YAW`` is several times ``RED_YAW``, and ``BLUE_FORWARD`` is less than
+one. A one-sided blue therefore turns the car harder than it brakes. That
+is what lets a frontal red and a right-hand blue arc left around the blue
+instead of stalling when the red shifts into the same half. The red-only
+arc is wider than the old equal-weight law.
 
 Nothing is firing, so an empty frame and a subthreshold color both stop.
 Equal blue on both sides cancels yaw and subtracts from forward, which is a
-stop when blue outweighs red. One side of blue with no red has no forward
-term left, so the car spins in place.
+stop when that weighted blue sum outweighs red. One side of blue with no
+red has no forward term left, so the car spins in place.
 
 The one hand-written exception is a safety stop. When both red halves are
 at least ``RED_FILL``, both wheels are held at rest even though DNa02 is
@@ -30,14 +38,17 @@ from dataclasses import dataclass
 import numpy as np
 
 # Membrane time constants match notebooks/chemotaxis_sim.ipynb.
-# RED_REF does not. That notebook still divides red counts by 0.25.
-R_MAX = 80.0
-R_REF = 50.0
+# The count references do not. That notebook still divides red counts by
+# 0.25, and it turns a loom rate into current with R_MAX / R_REF. Half-frame
+# fill is not a loom rate, so both colors use a count reference here.
 # A half-count equal to this is current 1. Exactly 1 never spikes. 0.15 matches
-# COUNT_FLOOR, so a red the camera still counts can fire. The old 0.25 left
+# COUNT_FLOOR, so a color the camera still counts can fire. The old 0.25 left
 # the front-scene red (about 0.19 a side) silent, and the rate law then had
-# nothing to drive the wheels with.
+# nothing to drive the wheels with. The old blue scale (80/50) left a blue
+# that filled about 0.6 of one half below threshold, so avoidance died while
+# the obstacle was still in frame.
 RED_REF = 0.15
+BLUE_REF = 0.15
 TAU_MS = 5.0
 V_THRESHOLD = 1.0
 REFRAC_MS = 5.0
@@ -52,10 +63,15 @@ RED_FILL = 0.75
 COUNT_FLOOR = 0.15
 
 # Front red 0.45/0.45 settles near 167 Hz a side. That sum is 0.20 m/s.
-# FORWARD / YAW is the turning radius while only one cell is firing, 0.25 m.
-# It stays above TRACK/2, so that arc keeps both wheels forward.
+# FORWARD / (RED_YAW * YAW) is the turning radius while only one red cell
+# is firing, 1 m. It stays above TRACK/2, so that arc keeps both wheels
+# forward. BLUE_YAW / RED_YAW is 6, so the same rate on one blue cell
+# out-turns the red. BLUE_FORWARD leaves forward speed when the rates match.
 FORWARD_PER_HZ = 0.0006
 YAW_PER_HZ = 0.0024
+RED_YAW = 0.25
+BLUE_YAW = 1.5
+BLUE_FORWARD = 0.35
 
 
 def present_count(count: float) -> float:
@@ -96,11 +112,9 @@ def dna_current(red_l: float, red_r: float) -> tuple[float, float]:
 
 
 def gf_current(blue_l: float, blue_r: float) -> tuple[float, float]:
-    # Whole VPN population at one rate. Side totals cancel, so the feather
-    # weights are not needed for the left/right current.
-    rate_l = float(np.clip(present_count(blue_l), 0.0, 1.0) * R_MAX)
-    rate_r = float(np.clip(present_count(blue_r), 0.0, 1.0) * R_MAX)
-    return (rate_l / R_REF, rate_r / R_REF)
+    # Same occupancy-to-current map as DNa02. Side totals cancel, so the
+    # feather weights are not needed for the left/right current.
+    return (present_count(blue_l) / BLUE_REF, present_count(blue_r) / BLUE_REF)
 
 
 def red_fills_the_frame(red_l: float, red_r: float) -> bool:
@@ -111,11 +125,12 @@ def red_fills_the_frame(red_l: float, red_r: float) -> bool:
 def speed_and_yaw(dna_l: float, dna_r: float, gf_l: float, gf_r: float) -> tuple[float, float]:
     """Forward speed in m/s and yaw in rad/s. Positive yaw turns left.
 
-    Forward is the red sum minus the blue sum, clipped so the car does not
-    reverse. Yaw adds the two left-right differences.
+    Forward is the red sum minus a fraction of the blue sum, clipped so the
+    car does not reverse. Yaw weights the blue difference more than the red
+    difference, so a one-sided obstacle out-turns the attractant.
     """
-    forward = (dna_l + dna_r) - (gf_l + gf_r)
-    yaw = (dna_l - dna_r) + (gf_r - gf_l)
+    forward = (dna_l + dna_r) - BLUE_FORWARD * (gf_l + gf_r)
+    yaw = RED_YAW * (dna_l - dna_r) + BLUE_YAW * (gf_r - gf_l)
     speed = max(0.0, forward * FORWARD_PER_HZ)
     omega = yaw * YAW_PER_HZ
     return speed, omega

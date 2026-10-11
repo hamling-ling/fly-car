@@ -13,9 +13,12 @@ from __future__ import annotations
 import pytest
 
 from flycar.behavior import (
+    BLUE_FORWARD,
+    BLUE_YAW,
     COUNT_FLOOR,
     FORWARD_PER_HZ,
     Hold,
+    RED_YAW,
     YAW_PER_HZ,
     hold,
     speed_and_yaw,
@@ -64,11 +67,15 @@ def assert_spinning(got: Hold, turn: float) -> None:
 
 
 def assert_arc(got: Hold, turn: float) -> None:
-    """turn > 0 is a left arc. Both wheels stay forward."""
+    """turn > 0 is a left arc. Both wheels stay forward.
+
+    The red-only radius is 1 m, so one second of a pure red arc is a small
+    heading. The gates sit under that arc and under the sharper blue dodge.
+    """
     assert_rolling(got)
-    assert turn * got.omega > 0.2
-    assert turn * got.y > 0.02
-    assert turn * got.heading > 0.2
+    assert turn * got.omega > 0.05
+    assert turn * got.y > 0.005
+    assert turn * got.heading > 0.1
 
 
 class TestStep1:
@@ -106,16 +113,18 @@ class TestNothing:
         assert_stopped(show(faint, faint))
 
     def test_rates_from_both_pathways_add(self) -> None:
-        """前後は赤の和から青の和を引き、ヨーは両方の差を足す。"""
+        """前後は赤の和から青の和の BLUE_FORWARD 倍を引き、ヨーは重み付きの差を足す。"""
         speed, omega = speed_and_yaw(5.0, 20.0, 10.0, 40.0)
-        assert speed == 0.0
-        assert omega == pytest.approx(((5.0 - 20.0) + (40.0 - 10.0)) * YAW_PER_HZ)
+        forward = (5.0 + 20.0) - BLUE_FORWARD * (10.0 + 40.0)
+        yaw = RED_YAW * (5.0 - 20.0) + BLUE_YAW * (40.0 - 10.0)
+        assert speed == pytest.approx(forward * FORWARD_PER_HZ)
+        assert omega == pytest.approx(yaw * YAW_PER_HZ)
 
     def test_red_sum_keeps_forward_against_a_smaller_blue(self) -> None:
-        """青の和が赤の和より小さいと、前進が残る。"""
+        """青の重み付き和が赤の和より小さいと、前進が残る。"""
         speed, omega = speed_and_yaw(80.0, 80.0, 0.0, 40.0)
-        assert speed == pytest.approx((160.0 - 40.0) * FORWARD_PER_HZ)
-        assert omega == pytest.approx(40.0 * YAW_PER_HZ)
+        assert speed == pytest.approx((160.0 - BLUE_FORWARD * 40.0) * FORWARD_PER_HZ)
+        assert omega == pytest.approx(BLUE_YAW * 40.0 * YAW_PER_HZ)
 
     def test_red_at_the_floor_does_not_fire(self) -> None:
         """床ちょうどは電流 1 で、スパイクせず止まる。"""
@@ -156,15 +165,17 @@ class TestStep3:
 
 
 class TestStep4:
-    def test_right_blue_weakens_a_right_red(self) -> None:
-        """右の赤と右の青は逆のヨーなので、赤だけの弧より弱く遅くなる。"""
+    def test_right_blue_turns_a_right_red_away(self) -> None:
+        """右の赤と右の青は逆のヨーで、青が勝って左へ避ける。前進は残るが遅くなる。"""
         alone = show(RIGHT_RED, NO_BLUE)
         got = show(RIGHT_RED, RIGHT_BLUE)
         assert got.mode == "cruise"
-        assert got.omega * alone.omega > 0
-        assert abs(got.omega) < abs(alone.omega)
+        assert alone.omega < 0.0
+        assert got.omega > 0.2
         assert got.speed < alone.speed
         assert got.x > 0.0
+        assert got.v_left > 0.0
+        assert got.v_right > 0.0
 
     def test_left_blue_adds_to_a_right_red(self) -> None:
         """右の赤と左の青は同じ向きのヨーなので、赤だけのときより強く回る。"""
@@ -176,15 +187,17 @@ class TestStep4:
 
 
 class TestStep5:
-    def test_left_blue_weakens_a_left_red(self) -> None:
-        """左の赤と左の青は逆のヨーなので、赤だけの弧より弱く遅くなる。"""
+    def test_left_blue_turns_a_left_red_away(self) -> None:
+        """左の赤と左の青は逆のヨーで、青が勝って右へ避ける。前進は残るが遅くなる。"""
         alone = show(LEFT_RED, NO_BLUE)
         got = show(LEFT_RED, LEFT_BLUE)
         assert got.mode == "cruise"
-        assert got.omega * alone.omega > 0
-        assert abs(got.omega) < abs(alone.omega)
+        assert alone.omega > 0.0
+        assert got.omega < -0.2
         assert got.speed < alone.speed
         assert got.x > 0.0
+        assert got.v_left > 0.0
+        assert got.v_right > 0.0
 
     def test_right_blue_adds_to_a_left_red(self) -> None:
         """左の赤と右の青は同じ向きのヨーなので、赤だけのときより強く回る。"""
