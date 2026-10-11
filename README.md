@@ -80,47 +80,103 @@ Uno Q に Brio 100 を載せて 1 枚取る手順は [research/camera_capture_q/
 
 走行シミュレーションが毎ステップ掛けているのは、切り出した全シナプスの行列ではない。MaleCNS から残した細胞のうち、赤は DNa02、青は DNp01 で、カメラのカウントをその 4 本の電流にする。結合表を細胞ごとに積分するのは `notebooks/gf_loom_sim.ipynb` である。
 
-### ブロック図
+### システム概要
 
-同じ車輪則を、実機のカメラでも、PC 上の球でも使う。
+同じ車輪則を、実機のカメラでも、PC 上の球でも使う。感覚のあとを Arduino Uno Q が受け、前処理、コネクトーム、後処理の 3 層で車輪速度まで出す。車輪を回すのは別のマイコンである。赤の占有は同側の DNa02 へ直接入る。青の占有は同側の LC4 と LPLC2 に同じ率で入り、その 2 種は同側の DNp01 にだけ繋がる。走行則では、その正規化した電流を DNp01 へ占有から直接入れている。辺ごとの積和は `notebooks/gf_loom_sim.ipynb` にある。
 
 ```mermaid
-flowchart LR
+flowchart TB
   subgraph sense [感覚]
+    direction LR
     cam["USB カメラ"]
     sim["シミュレーションの球"]
   end
-  cam --> counts["左右の赤と青"]
-  sim --> counts
-  counts --> cells["DNa02 と DNp01"]
-  cells --> rates["発火率"]
-  rates --> cmd["前進とヨー"]
-  cmd --> wheels["左右の車輪"]
-  guard["赤が左右を埋めたら停止"] --> wheels
+  subgraph unoq [Arduino Uno Q]
+    direction TB
+    subgraph pre [前処理]
+      direction LR
+      halves["半画面の占有"]
+      redL["左の赤"]
+      redR["右の赤"]
+      blueL["左の青"]
+      blueR["右の青"]
+    end
+    subgraph connectome [コネクトーム]
+      direction LR
+      dnaL["DNa02 左"]
+      dnaR["DNa02 右"]
+      lc4L["LC4 左"]
+      lplcL["LPLC2 左"]
+      lc4R["LC4 右"]
+      lplcR["LPLC2 右"]
+      dnpL["DNp01 左"]
+      dnpR["DNp01 右"]
+    end
+    subgraph post [後処理]
+      direction LR
+      law["前進 u とヨー ψ"]
+      guard["赤が左右を埋めたら停止"]
+    end
+  end
+  subgraph mcu [マイコン]
+    wheels["左右の車輪"]
+  end
+  cam --> halves
+  sim --> halves
+  halves --> redL
+  halves --> redR
+  halves --> blueL
+  halves --> blueR
+  redL --> dnaL
+  redR --> dnaR
+  blueL --> lc4L
+  blueL --> lplcL
+  blueR --> lc4R
+  blueR --> lplcR
+  lc4L --> dnpL
+  lplcL --> dnpL
+  lc4R --> dnpR
+  lplcR --> dnpR
+  dnaL --> law
+  dnaR --> law
+  dnpL --> law
+  dnpR --> law
+  law --> wheels
+  guard --> wheels
 ```
 
-### データの流れ
+### シーケンス
 
-1 フレームの中身は次の順で渡る。膜の刻みは 1 ms、絵を測る間隔は 20 ms で、そのあいだカウントは固定する。
+図は本番の一周である。メイン処理はまだ無い。今のシミュレーションでは `fov.simulate` がその役で、`Plant.step` を 1 ms ずつ 20 回呼んでいる。図の `steps()` はまだコードには無い。占有から電流への変換は 20 ms に 1 回で、膜だけを 1 ms ずつ 20 回進める。その最後の発火率から、前進とヨー、タイヤ回転数を 1 回求める。カメラの代わりに `fov.project_blob` が地面の球を画面へ投影し、左右の半画面の占有を出す。画像の解析ではない。`steps()` は 20 ms に 1 回で、PWM の 1 周期と同じである。戻り値の回転数をマイコンへ送る処理も、まだリポジトリに無い。
 
 ```mermaid
 sequenceDiagram
+  participant Main as メイン処理
   participant Cam as カメラ
-  participant Count as 半画面
-  participant Cell as DNa02 と DNp01
-  participant Law as 和と差
-  participant Motor as モーター
-  Cam->>Count: フレーム
-  Count->>Cell: 電流
-  Cell->>Law: 発火率
-  Law->>Motor: 左右の車輪速度
+  participant Plant as behavior.Plant
+  participant Lif as behavior.Lif
+  participant Mcu as マイコン
+  loop 走行中
+    Main->>Cam: フレーム
+    Cam-->>Main: 画像
+    Main->>Plant: steps(左右の赤と青)
+    Plant->>Plant: 赤と青の占有を DNa02 と DNp01 の電流値に変換
+    loop 1 ms ずつ 20 ms ぶん繰り返す
+      Plant->>Lif: 左右の DNa02 と DNp01 を 1 ms 進める
+      Lif-->>Plant: 発火率
+    end
+    Plant->>Plant: 前進 u とヨー ψ に変換
+    Plant->>Plant: タイヤ回転数に変換
+    Plant-->>Main: 左右のタイヤ回転数
+    Main-->>Mcu: 左右のタイヤを回転
+  end
 ```
 
 ### カメラからコネクトームへの入力
 
 画面の水平を $n_x$、垂直を $n_y$ とし、どちらも $[-1,1]$ である。右が正、上が正。カウント $c$ は、球の投影が左右どちらかの半画面と重なる水平幅を、その半画面の幅 1 で割ったものである。縦にはみ出しても幅は減らさない。画面の外は 0。範囲は 0 から 1。
 
-カメラの床 $\theta = 0.15$ 未満は、電流にする前に空とみなす。この値はカメラを繋いだときに合わせる。
+カメラの床 $\theta$ 未満は、電流にする前に空とみなす。この値はカメラを繋いだときに合わせる。数は巻末の表にある。
 
 $$
 \tilde{c} =
@@ -130,14 +186,14 @@ c & c \ge \theta
 \end{cases}
 $$
 
-赤は DNa02、青は DNp01。左右で 1 本ずつ、合わせて 4 本ある。どちらの電流も、半画面の占有が 0.15 のとき 1 になるように割る。占有は loom の拡大速度ではないので、青には $R_{\max}/R_{\mathrm{ref}}$ を掛けない。
+赤は DNa02、青は DNp01。左右で 1 本ずつ、合わせて 4 本ある。どちらの電流も、半画面の占有が $c_{\mathrm{ref}}$ のとき 1 になるように割る。占有は loom の拡大速度ではないので、青には $R_{\max}/R_{\mathrm{ref}}$ を掛けない。
 
 $$
-I^{\mathrm{DNa02}}_{L,R} = \tilde{c}^{\mathrm{red}}_{L,R} / 0.15
+I^{\mathrm{DNa02}}_{L,R} = \tilde{c}^{\mathrm{red}}_{L,R} / c_{\mathrm{ref}}
 $$
 
 $$
-I^{\mathrm{DNp01}}_{L,R} = \tilde{c}^{\mathrm{blue}}_{L,R} / 0.15
+I^{\mathrm{DNp01}}_{L,R} = \tilde{c}^{\mathrm{blue}}_{L,R} / c_{\mathrm{ref}}
 $$
 
 膜は電流入力の LIF で、時定数 $\tau = 5\,\mathrm{ms}$、閾値 1、不応期 5 ms、刻み $\Delta t = 1\,\mathrm{ms}$ である。
@@ -159,29 +215,47 @@ $$
 4 本の発火率から前進 $v$（m/s、前が正）とヨー $\omega$（rad/s、左が正）を同時に出す。モードを選ぶ分岐は無い。
 
 $$
-u = (r^{\mathrm{DNa02}}_L + r^{\mathrm{DNa02}}_R) - 0.35\,(r^{\mathrm{DNp01}}_L + r^{\mathrm{DNp01}}_R)
+u = (r^{\mathrm{DNa02}}_L + r^{\mathrm{DNa02}}_R) - \beta_u\,(r^{\mathrm{DNp01}}_L + r^{\mathrm{DNp01}}_R)
 $$
 
 $$
-\psi = 0.25\,(r^{\mathrm{DNa02}}_L - r^{\mathrm{DNa02}}_R) + 1.5\,(r^{\mathrm{DNp01}}_R - r^{\mathrm{DNp01}}_L)
+\psi = \beta_r\,(r^{\mathrm{DNa02}}_L - r^{\mathrm{DNa02}}_R) + \beta_b\,(r^{\mathrm{DNp01}}_R - r^{\mathrm{DNp01}}_L)
 $$
 
 $$
-v = \max(0,\ 0.0006\, u), \qquad \omega = 0.0024\, \psi
+v = \max(0,\ k_v\, u), \qquad \omega = k_\omega\, \psi
 $$
 
-右の赤は $r^{\mathrm{DNa02}}_R$ を増やして右へ回る。右の青は $r^{\mathrm{DNp01}}_R$ を増やして左へ回る。青の和は前進を削るが、係数 0.35 なので同じ発火率では赤の和が残る。ヨーでは青の差が赤の差の 6 倍なので、片側の青は、その回避で同じ半画面へ寄った赤より強く回る。負の $u$ は 0 にするので、後退はしない。赤の片側だけが発火しているときの回転半径は $0.0006 / (0.25 \times 0.0024) = 1\,\mathrm{m}$ である。
+右の赤は $r^{\mathrm{DNa02}}_R$ を増やして右へ回る。右の青は $r^{\mathrm{DNp01}}_R$ を増やして左へ回る。青の和は $\beta_u$ 倍して前進から引く。$\beta_u$ は 1 より小さいので、同じ発火率では赤の和が残る。ヨーでは $\beta_b$ が $\beta_r$ より大きいので、片側の青は、その回避で同じ半画面へ寄った赤より強く回る。負の $u$ は 0 にするので、後退はしない。赤の片側だけが発火しているときの回転半径は $k_v / (\beta_r k_\omega)$ である。
 
-例外が一つある。床を通したあと赤の左右がどちらも 0.75 以上なら、発火していても車輪を止める。
+例外が一つある。床を通したあと赤の左右がどちらも $c_{\mathrm{stop}}$ 以上なら、発火していても車輪を止める。
 
 $$
-\min(\tilde{c}^{\mathrm{red}}_L,\ \tilde{c}^{\mathrm{red}}_R) \ge 0.75 \implies v = 0,\ \omega = 0
+\min(\tilde{c}^{\mathrm{red}}_L,\ \tilde{c}^{\mathrm{red}}_R) \ge c_{\mathrm{stop}} \implies v = 0,\ \omega = 0
 $$
 
-軌間 $d = 0.12\,\mathrm{m}$ の左右輪は次のとおり。$\omega > 0$ のとき右輪が速い。
+軌間 $d$ の左右輪は次のとおり。$\omega > 0$ のとき右輪が速い。
 
 $$
 v_L = v - \omega\, d / 2, \qquad v_R = v + \omega\, d / 2
 $$
 
 図に出す「停止」「その場旋回」「前進」は、この車輪の符号へ後から付けた名前である。車輪の指令には戻らない。
+
+## 定数
+
+走行則の式に入れた数。膜の時定数 $\tau = 5\,\mathrm{ms}$、不応期 5 ms、刻み $\Delta t = 1\,\mathrm{ms}$、発火率の時定数 $\tau_r = 100\,\mathrm{ms}$ は上の式のそばに書いた。
+
+| 記号 | コード | 意味 | 値 |
+|---|---|---|---|
+| $\theta$ | `COUNT_FLOOR` | 半画面の占有がこれ未満なら空 | 0.15 |
+| $c_{\mathrm{ref}}$ | `RED_REF`, `BLUE_REF` | この占有で電流が 1 | 0.15 |
+| $\beta_u$ | `BLUE_FORWARD` | 青の和を前進から引く係数 | 0.35 |
+| $\beta_r$ | `RED_YAW` | 赤の左右差のヨー係数 | 0.25 |
+| $\beta_b$ | `BLUE_YAW` | 青の左右差のヨー係数 | 1.5 |
+| $k_v$ | `FORWARD_PER_HZ` | 発火率から前進速度 | 0.0006 m/s/Hz |
+| $k_\omega$ | `YAW_PER_HZ` | 発火率からヨー角速度 | 0.0024 rad/s/Hz |
+| $c_{\mathrm{stop}}$ | `RED_FILL` | 左右の赤がともにこれ以上なら停止 | 0.75 |
+| $d$ | `TRACK` | 軌間 | 0.12 m |
+
+赤だけが片側で発火しているときの回転半径 $k_v / (\beta_r k_\omega)$ は 1 m。
