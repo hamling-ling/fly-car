@@ -31,6 +31,8 @@ cd fly-car
 python3 -m pip install numpy matplotlib japanize-matplotlib pandas pyarrow pytest jupyter
 ```
 
+パッケージ `flycar` は `src/flycar` にある。`pytest` は `pyproject.toml` の `pythonpath` でそこを読む。ノートは同じ `src` を `sys.path` に足す。
+
 ### コネクトームの切り出し
 
 結合表の入手、NeuPrint からの取り直し、loom 回路と DNa02 回路の切り出しは [scripts/README.md](scripts/README.md) に書いた。画角のシミュレーションと `pytest` は、この表が無くても動く。
@@ -51,7 +53,7 @@ python3 -m pytest tests/test_behavior.py tests/test_fov.py
 
 ### 実機で動かす
 
-これから。カメラで止めて、車輪まで出すところはまだ車体に載っていない。
+本番のアプリは `src/flycar_q/`。カメラのフレームを左右の赤と青にし、`src/flycar` の車輪則を通してタイヤを回す場所である。この一周はまだつながっていない。ラジコンとモーターの確認は `research/` に残してある。
 
 ## 内容物
 
@@ -59,9 +61,9 @@ python3 -m pytest tests/test_behavior.py tests/test_fov.py
 
 | 場所 | 内容 |
 |---|---|
-| `flycar/behavior.py` | 半画面の赤と青から、左右の車輪速度 |
-| `flycar/fov.py` | 地面の球をカメラへ投影し、車を進める |
-| `flycar/view.py` | 俯瞰、カメラ、ニューロンの図 |
+| `src/flycar/behavior.py` | 半画面の赤と青から、左右の車輪速度 |
+| `src/flycar/fov.py` | 地面の球をカメラへ投影し、車を進める |
+| `src/flycar/view.py` | 俯瞰、カメラ、ニューロンの図 |
 | `notebooks/fov_sim.ipynb` | 基準の 1 場面 |
 | `notebooks/fov_scenes.ipynb` | 球の位置を変えた場面 |
 | `notebooks/gf_loom_sim.ipynb` | loom 回路の結合と DNp01 |
@@ -72,9 +74,11 @@ python3 -m pytest tests/test_behavior.py tests/test_fov.py
 
 Uno Q に Brio 100 を載せて 1 枚取る手順は [research/camera_capture_q/README.md](research/camera_capture_q/README.md)。スクリプトは `research/camera_capture_q/capture.py`。
 
-### 実機で動かす
+### 本番の車
 
-これから。
+| 場所 | 内容 |
+|---|---|
+| `src/flycar_q/` | Uno Q に載せるアプリ。メイン処理はこれから |
 
 ## システムの解説
 
@@ -147,7 +151,7 @@ flowchart TB
 
 ### シーケンス
 
-図は本番の一周である。メイン処理はまだ無い。今のシミュレーションでは `fov.simulate` がその役で、`Plant.step` を 1 ms ずつ 20 回呼んでいる。図の `steps()` はまだコードには無い。占有から電流への変換は 20 ms に 1 回で、膜だけを 1 ms ずつ 20 回進める。その最後の発火率から、前進とヨー、タイヤ回転数を 1 回求める。カメラの代わりに `fov.project_blob` が地面の球を画面へ投影し、左右の半画面の占有を出す。画像の解析ではない。`steps()` は 20 ms に 1 回で、PWM の 1 周期と同じである。戻り値の回転数をマイコンへ送る処理も、まだリポジトリに無い。
+図は本番の一周である。メイン処理の置き場所は `src/flycar_q` で、中身はまだ無い。今のシミュレーションでは `fov.simulate` がその役で、`Plant.step` を 1 ms ずつ 20 回呼んでいる。図の `steps()` はまだコードには無い。占有から電流への変換は 20 ms に 1 回で、膜だけを 1 ms ずつ 20 回進める。その最後の発火率から、前進とヨー、タイヤ回転数を 1 回求める。カメラの代わりに `fov.project_blob` が地面の球を画面へ投影し、左右の半画面の占有を出す。画像の解析ではない。`steps()` は 20 ms に 1 回で、PWM の 1 周期と同じである。戻り値の回転数をマイコンへ送る処理も、まだリポジトリに無い。
 
 ```mermaid
 sequenceDiagram

@@ -1,0 +1,7 @@
+# 本番の App Lab アプリ。コネクトームの一周はまだつながっていない。
+
+name: flycar_q
+description: カメラの赤と青をコネクトームに通し、左右の車輪を回す
+icon: 🪰
+ports: []
+bricks: []
