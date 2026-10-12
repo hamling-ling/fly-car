@@ -1,0 +1,64 @@
+#include <Arduino_RouterBridge.h>
+#include <Servo.h>
+
+// ログ出力マクロの定義（1ステップでバッファ作成から出力まで行います）
+#define LOG_MONITOR(format, ...) do { \
+    char _log_buf[128]; \
+    snprintf(_log_buf, sizeof(_log_buf), format, ##__VA_ARGS__); \
+    Monitor.println(_log_buf); \
+} while(0)
+
+
+Servo rightMotor;
+Servo leftMotor;
+
+const int RIGHT_MOTOR_PIN = 3;
+const int LEFT_MOTOR_PIN  = 5;
+
+enum MCU_RESULT : int {
+    MCU_SUCCESS = 0,
+    MCU_ERROR = -1
+};
+
+/**
+ * モーター速度設定
+ * rightPulse / leftPulse: -255〜255
+ *   負 = 後退、正 = 前進、0 = 停止
+ * 内部で 1000〜2000 µs に変換（1500が停止）
+ */
+int setMotorSpeed(int rightPulse, int leftPulse) {
+    // 範囲制限
+    rightPulse = constrain(rightPulse, -255, 255);
+    leftPulse  = constrain(leftPulse,  -255, 255);
+
+    // パルス幅計算（1000〜2000µs）
+    int leftUs  = 1500 - (int)(leftPulse  / 255.0 * 500);  // 左は CCW が全身
+    int rightUs = 1500 + (int)(rightPulse / 255.0 * 500);  // 右は CW が全身
+
+    rightMotor.writeMicroseconds(rightUs);
+    leftMotor.writeMicroseconds(leftUs);
+
+    LOG_MONITOR("setMotorSpeed L:%d(%dus) R:%d(%dus)", leftPulse, leftUs, rightPulse, rightUs);
+
+    return MCU_RESULT::MCU_SUCCESS;
+}
+
+void setup() {
+    Monitor.begin(115200);
+    delay(100);  // Monitor安定待ち
+
+    rightMotor.attach(RIGHT_MOTOR_PIN);
+    leftMotor.attach(LEFT_MOTOR_PIN);
+
+    // 初期状態は停止
+    setMotorSpeed(0, 0);
+
+    Bridge.begin();
+    Bridge.provide("setMotorSpeed", setMotorSpeed);
+
+    Monitor.println("Motor ready");
+}
+
+void loop() {
+    // Bridge経由で呼ばれるだけなので空でOK
+}

@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ラジコン</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #16181d;
+      --panel: #23262e;
+      --line: #3a3f4a;
+      --text: #f2f3f5;
+      --muted: #a7adba;
+      --held: #e2a100;
+      --held-ink: #1c1400;
+      --danger: #d4554a;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Noto Sans CJK JP", "Hiragino Sans", "Yu Gothic", sans-serif;
+    }
+    main {
+      display: grid;
+      gap: 16px;
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 16px;
+    }
+    @media (min-width: 860px) {
+      main { grid-template-columns: minmax(0, 1fr) 280px; align-items: start; }
+    }
+    h1 { font-size: 1.25rem; font-weight: 650; margin: 0 0 8px; }
+    .view {
+      background: #000;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      overflow: hidden;
+      aspect-ratio: 16 / 9;
+    }
+    .view img { display: block; width: 100%; height: 100%; object-fit: contain; background: #000; }
+    .camera-note { color: var(--danger); min-height: 1.4em; margin: 8px 0 0; }
+    .readout {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      margin-top: 8px;
+      color: var(--muted);
+      font-variant-numeric: tabular-nums;
+    }
+    .readout strong { color: var(--text); font-weight: 650; }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 16px;
+    }
+    label { display: block; color: var(--muted); margin-bottom: 6px; }
+    input[type="range"] { width: 100%; accent-color: var(--held); }
+    .speed-value { text-align: right; font-variant-numeric: tabular-nums; }
+    .pad {
+      display: grid;
+      grid-template-columns: repeat(3, 72px);
+      grid-template-rows: repeat(3, 72px);
+      gap: 8px;
+      justify-content: center;
+      margin: 18px 0 8px;
+      touch-action: none;
+      user-select: none;
+    }
+    button {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #2c303a;
+      color: var(--text);
+      font: inherit;
+      font-size: 1.35rem;
+    }
+    button.held, button:active { background: var(--held); color: var(--held-ink); border-color: var(--held); }
+    button.stop { font-size: 0.95rem; }
+    .hint { color: var(--muted); font-size: 0.92rem; line-height: 1.5; margin: 8px 0 0; }
+    .link-off { color: var(--danger); }
+  </style>
+</head>
+<body>
+  <main>
+    <section>
+      <h1>ラジコン</h1>
+      <div class="view">
+        <img id="camera" alt="車載カメラ" src="/stream">
+      </div>
+      <p id="camera-note" class="camera-note"></p>
+      <div class="readout">
+        <span id="motion">停止</span>
+        <span>右 <strong id="pulse-right">0</strong>　左 <strong id="pulse-left">0</strong></span>
+      </div>
+    </section>
+    <section class="panel">
+      <label for="speed">速度 <span id="speed-value" class="speed-value">160</span></label>
+      <input id="speed" type="range" min="0" max="255" value="160">
+      <div class="pad" id="pad">
+        <span></span>
+        <button type="button" data-dir="up" aria-label="前進">↑</button>
+        <span></span>
+        <button type="button" data-dir="left" aria-label="左旋回">←</button>
+        <button type="button" class="stop" id="stop" aria-label="停止">停止</button>
+        <button type="button" data-dir="right" aria-label="右旋回">→</button>
+        <span></span>
+        <button type="button" data-dir="down" aria-label="後退">↓</button>
+        <span></span>
+      </div>
+      <p class="hint">矢印キーか W A S D。離すと止まる。スペースでも止まる。通信が切れるとボード側でも止まる。</p>
+      <p id="link" class="hint">操作 接続待ち</p>
+    </section>
+  </main>
+  <script>
+    const MAP = {
+      ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right",
+      w: "up", W: "up", a: "left", A: "left", s: "down", S: "down", d: "right", D: "right",
+    };
+    const LABELS = {
+      "": "停止",
+      "up": "前進",
+      "down": "後退",
+      "left": "左旋回",
+      "right": "右旋回",
+      "up+right": "右へ曲がりながら前進",
+      "up+left": "左へ曲がりながら前進",
+      "down+right": "右へ曲がりながら後退",
+      "down+left": "左へ曲がりながら後退",
+    };
+
+    const sources = new Set();
+    const held = new Set();
+    const speedInput = document.getElementById("speed");
+    const motion = document.getElementById("motion");
+    const link = document.getElementById("link");
+    let timer = null;
+    let inflight = false;
+    let pending = false;
+
+    function recompute() {
+      held.clear();
+      for (const source of sources) {
+        const dir = source.startsWith("pad:") ? source.slice(4) : MAP[source];
+        if (dir) held.add(dir);
+      }
+    }
+
+    function label() {
+      const forward = (held.has("up") ? 1 : 0) - (held.has("down") ? 1 : 0);
+      const yaw = (held.has("right") ? 1 : 0) - (held.has("left") ? 1 : 0);
+      const parts = [];
+      if (forward > 0) parts.push("up");
+      else if (forward < 0) parts.push("down");
+      if (yaw > 0) parts.push("right");
+      else if (yaw < 0) parts.push("left");
+      return LABELS[parts.join("+")] || "停止";
+    }
+
+    function paint() {
+      motion.textContent = label();
+      document.getElementById("speed-value").textContent = speedInput.value;
+      for (const button of document.querySelectorAll("#pad button[data-dir]")) {
+        button.classList.toggle("held", held.has(button.dataset.dir));
+      }
+    }
+
+    async function send() {
+      if (inflight) {
+        pending = true;
+        return;
+      }
+      inflight = true;
+      const params = new URLSearchParams({
+        up: held.has("up") ? "1" : "0",
+        down: held.has("down") ? "1" : "0",
+        left: held.has("left") ? "1" : "0",
+        right: held.has("right") ? "1" : "0",
+        speed: speedInput.value,
+      });
+      try {
+        const res = await fetch("/drive?" + params.toString(), { method: "POST" });
+        if (!res.ok) throw new Error(String(res.status));
+        const body = await res.json();
+        document.getElementById("pulse-right").textContent = body.right;
+        document.getElementById("pulse-left").textContent = body.left;
+        link.textContent = "操作 接続";
+        link.classList.remove("link-off");
+      } catch (err) {
+        link.textContent = "操作 切断";
+        link.classList.add("link-off");
+      } finally {
+        inflight = false;
+        if (pending) {
+          pending = false;
+          send();
+        }
+      }
+    }
+
+    function ensureHeartbeat() {
+      if (held.size === 0) {
+        if (timer) {
+          clearInterval(timer);
+          timer = null;
+        }
+        return;
+      }
+      if (!timer) timer = setInterval(send, 200);
+    }
+
+    function setSource(source, down) {
+      const had = sources.has(source);
+      if (down) sources.add(source);
+      else sources.delete(source);
+      if (sources.has(source) === had) return;
+      recompute();
+      paint();
+      send();
+      ensureHeartbeat();
+    }
+
+    function stopAll() {
+      sources.clear();
+      recompute();
+      paint();
+      send();
+      ensureHeartbeat();
+    }
+
+    window.addEventListener("keydown", (event) => {
+      if (event.key === " ") {
+        event.preventDefault();
+        if (!event.repeat) stopAll();
+        return;
+      }
+      if (!MAP[event.key] || event.repeat) return;
+      event.preventDefault();
+      setSource(event.key, true);
+    });
+    window.addEventListener("keyup", (event) => {
+      if (!MAP[event.key]) return;
+      event.preventDefault();
+      setSource(event.key, false);
+    });
+    window.addEventListener("blur", stopAll);
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) stopAll();
+    });
+
+    speedInput.addEventListener("input", () => {
+      paint();
+      if (held.size) send();
+    });
+
+    for (const button of document.querySelectorAll("#pad button[data-dir]")) {
+      button.addEventListener("pointerdown", (event) => {
+        event.preventDefault();
+        button.setPointerCapture(event.pointerId);
+        setSource("pad:" + button.dataset.dir, true);
+      });
+      const release = (event) => {
+        event.preventDefault();
+        setSource("pad:" + button.dataset.dir, false);
+      };
+      button.addEventListener("pointerup", release);
+      button.addEventListener("pointercancel", release);
+      button.addEventListener("lostpointercapture", release);
+    }
+    document.getElementById("stop").addEventListener("pointerdown", (event) => {
+      event.preventDefault();
+      stopAll();
+    });
+
+    document.getElementById("camera").addEventListener("error", () => {
+      document.getElementById("camera-note").textContent = "カメラの映像が来ていません。";
+    });
+    fetch("/status")
+      .then((res) => res.json())
+      .then((body) => {
+        if (!body.camera) {
+          document.getElementById("camera-note").textContent =
+            "カメラを開けていません。 " + (body.camera_error || "");
+        }
+      })
+      .catch(() => {});
+
+    paint();
+    send();
+  </script>
+</body>
+</html>
