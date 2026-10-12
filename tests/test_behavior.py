@@ -17,7 +17,9 @@ from flycar.behavior import (
     BLUE_YAW,
     COUNT_FLOOR,
     FORWARD_PER_HZ,
+    HOLD_STEPS,
     Hold,
+    Plant,
     RED_YAW,
     YAW_PER_HZ,
     hold,
@@ -206,3 +208,29 @@ class TestStep5:
         assert got.omega > alone.omega
         assert got.speed < alone.speed
         assert got.x > 0.0
+
+
+class TestSteps:
+    def test_window_matches_the_last_one_millisecond_step(self) -> None:
+        """The 20 ms window reads the same final rates as twenty single steps."""
+        single = Plant()
+        last = single.step(*FRONT_RED, *NO_BLUE)
+        for _ in range(HOLD_STEPS - 1):
+            last = single.step(*FRONT_RED, *NO_BLUE)
+        window = Plant().steps(*FRONT_RED, *NO_BLUE)
+        assert window.v_left == pytest.approx(last.v_left)
+        assert window.v_right == pytest.approx(last.v_right)
+        assert window.speed == pytest.approx(last.speed)
+        assert window.omega == pytest.approx(last.omega)
+        assert window.mode == last.mode
+
+    def test_full_red_stays_stopped(self) -> None:
+        got = Plant().steps(*FULL_RED, *NO_BLUE)
+        assert got.mode == "stop"
+        assert got.v_left == pytest.approx(0.0, abs=1e-9)
+        assert got.v_right == pytest.approx(0.0, abs=1e-9)
+        assert got.x == pytest.approx(0.0, abs=1e-9)
+
+    def test_rejects_an_empty_window(self) -> None:
+        with pytest.raises(ValueError):
+            Plant().steps(*NO_RED, *NO_BLUE, n=0)

@@ -53,7 +53,7 @@ python3 -m pytest tests/test_behavior.py tests/test_fov.py
 
 ### 実機で動かす
 
-本番のアプリは `src/flycar_q/`。カメラのフレームを左右の赤と青にし、`src/flycar` の車輪則を通してタイヤを回す場所である。この一周はまだつながっていない。ラジコンとモーターの確認は `research/` に残してある。
+本番のアプリは `src/flycar_q/`。起動は [src/flycar_q/README.md](src/flycar_q/README.md)。カメラのフレームを 0.10 秒ごとに左右の赤と青にし、0.02 秒ごとに `Plant.steps` を呼んでパルスをマイコンへ送る。色の範囲と、m/s からパルスへの倍率は、まだ床で合わせていない。ラジコンとモーターの確認は `research/` に残してある。
 
 ## 内容物
 
@@ -61,7 +61,9 @@ python3 -m pytest tests/test_behavior.py tests/test_fov.py
 
 | 場所 | 内容 |
 |---|---|
-| `src/flycar/behavior.py` | 半画面の赤と青から、左右の車輪速度 |
+| `src/flycar/behavior.py` | 半画面の赤と青から、左右の車輪速度。`Plant.steps` は 20 ms 分 |
+| `src/flycar/occupancy.py` | カメラ画像の赤と青の半画面占有 |
+| `src/flycar/pulse.py` | 車輪の m/s をサーボのパルスにする |
 | `src/flycar/fov.py` | 地面の球をカメラへ投影し、車を進める |
 | `src/flycar/view.py` | 俯瞰、カメラ、ニューロンの図 |
 | `research/notebooks/fov_sim.ipynb` | 基準の 1 場面 |
@@ -78,7 +80,7 @@ Uno Q に Brio 100 を載せて 1 枚取る手順は [research/camera_capture_q/
 
 | 場所 | 内容 |
 |---|---|
-| `src/flycar_q/` | Uno Q に載せるアプリ。メイン処理はこれから |
+| `src/flycar_q/` | Uno Q に載せるアプリ。カメラ、膜、車輪 |
 
 ## システムの解説
 
@@ -151,7 +153,7 @@ flowchart TB
 
 ### シーケンス
 
-図は本番の一周である。メイン処理の置き場所は `src/flycar_q` で、中身はまだ無い。今のシミュレーションでは `fov.simulate` がその役で、`Plant.step` を 1 ms ずつ 20 回呼んでいる。図の `steps()` はまだコードには無い。占有から電流への変換は 20 ms に 1 回で、膜だけを 1 ms ずつ 20 回進める。その最後の発火率から、前進とヨー、タイヤ回転数を 1 回求める。カメラの代わりに `fov.project_blob` が地面の球を画面へ投影し、左右の半画面の占有を出す。画像の解析ではない。`steps()` は 20 ms に 1 回で、PWM の 1 周期と同じである。戻り値の回転数をマイコンへ送る処理も、まだリポジトリに無い。
+図は本番の一周である。`src/flycar_q` がカメラのフレームを取り、`Plant.steps` を 20 ms に 1 回呼ぶ。占有から電流への変換はその窓で 1 回、膜だけを 1 ms ずつ 20 回進め、最後の発火率から前進とヨー、タイヤ速度を 1 回求める。その速度は `flycar.pulse` がサーボのパルスにし、スケッチが車輪を回す。シミュレーションの `fov.simulate` は、これまで通り `Plant.step` を 1 ms ずつ 20 回呼び、途中の速度でも姿勢を進める。カメラの代わりに `fov.project_blob` が地面の球を画面へ投影する。画像の占有は `flycar.occupancy.half_counts` で、半画面の画素数の割合である。
 
 ```mermaid
 sequenceDiagram

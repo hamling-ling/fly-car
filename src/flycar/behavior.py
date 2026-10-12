@@ -53,6 +53,8 @@ TAU_MS = 5.0
 V_THRESHOLD = 1.0
 REFRAC_MS = 5.0
 DT = 0.001
+# One camera command. fov.simulate still calls step() this many times.
+HOLD_STEPS = 20
 TAU_RATE_S = 0.100
 TRACK = 0.12
 
@@ -182,6 +184,41 @@ class Plant:
         self.gf_r.step(i_gf[1])
         self.dna_l.step(i_dna[0])
         self.dna_r.step(i_dna[1])
+        return self._emit(red_l, red_r, blue_l, blue_r, DT)
+
+    def steps(
+        self,
+        red_l: float,
+        red_r: float,
+        blue_l: float,
+        blue_r: float,
+        n: int = HOLD_STEPS,
+    ) -> Step:
+        """Hold one frame for ``n`` milliseconds of membrane time.
+
+        The occupancy is turned into current once. Only the membranes advance
+        on each 1 ms tick. Forward speed, yaw, and the wheel speeds are read
+        once from the rates at the end of the window.
+        """
+        if n < 1:
+            raise ValueError("n must be at least 1")
+        i_gf = gf_current(blue_l, blue_r)
+        i_dna = dna_current(red_l, red_r)
+        for _ in range(n):
+            self.gf_l.step(i_gf[0])
+            self.gf_r.step(i_gf[1])
+            self.dna_l.step(i_dna[0])
+            self.dna_r.step(i_dna[1])
+        return self._emit(red_l, red_r, blue_l, blue_r, DT * n)
+
+    def _emit(
+        self,
+        red_l: float,
+        red_r: float,
+        blue_l: float,
+        blue_r: float,
+        dt: float,
+    ) -> Step:
         if red_fills_the_frame(red_l, red_r):
             speed = 0.0
             omega = 0.0
@@ -194,9 +231,9 @@ class Plant:
             )
         v_left, v_right = wheels(omega, speed)
         mode = motion_mode(speed, v_left, v_right)
-        self.x += speed * float(np.cos(self.heading)) * DT
-        self.y += speed * float(np.sin(self.heading)) * DT
-        self.heading = float((self.heading + omega * DT + np.pi) % (2 * np.pi) - np.pi)
+        self.x += speed * float(np.cos(self.heading)) * dt
+        self.y += speed * float(np.sin(self.heading)) * dt
+        self.heading = float((self.heading + omega * dt + np.pi) % (2 * np.pi) - np.pi)
         return Step(
             mode=mode,
             speed=speed,
