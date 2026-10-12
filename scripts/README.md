@@ -2,7 +2,7 @@
 
 トップの説明は [README](../README.md)。ここは MaleCNS の表を取り、巨大線維の loom 回路と DNa02 の走性回路だけを残す手順である。
 
-git には元表も切り出し結果も入っていない。ノートのうち `notebooks/gf_loom_sim.ipynb` と `notebooks/chemotaxis_sim.ipynb` は、下の切り出し結果を読む。車の車輪則 `src/flycar/behavior.py` と画角のノートは、この表が無くても動く。
+git には元表も切り出し結果も入っていない。ノートのうち `research/notebooks/gf_loom_sim.ipynb` と `research/notebooks/chemotaxis_sim.ipynb` は、下の切り出し結果を読む。車の車輪則 `src/flycar/behavior.py` と画角のノートは、この表が無くても動く。
 
 ## Release から取る
 

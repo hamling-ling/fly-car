@@ -37,7 +37,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-# Membrane time constants match notebooks/chemotaxis_sim.ipynb.
+# Membrane time constants match research/notebooks/chemotaxis_sim.ipynb.
 # The count references do not. That notebook still divides red counts by
 # 0.25, and it turns a loom rate into current with R_MAX / R_REF. Half-frame
 # fill is not a loom rate, so both colors use a count reference here.

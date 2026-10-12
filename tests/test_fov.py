@@ -1,4 +1,4 @@
-"""Closed-loop check for the reference camera scene in notebooks/fov_sim.ipynb.
+"""Closed-loop check for the reference camera scene in research/notebooks/fov_sim.ipynb.
 
 Run from the repository root:
 

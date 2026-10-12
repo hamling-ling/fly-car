@@ -47,9 +47,9 @@ python3 -m pip install numpy matplotlib japanize-matplotlib pandas pyarrow pytes
 python3 -m pytest tests/test_behavior.py tests/test_fov.py
 ```
 
-絵を見るときは `notebooks/fov_sim.ipynb` を開く。球の位置を変えるのは `notebooks/fov_scenes.ipynb`。どちらもコネクトームの表は読まない。結合そのものを積分するのは `notebooks/gf_loom_sim.ipynb` と `notebooks/chemotaxis_sim.ipynb` で、先に [切り出し](scripts/README.md) を済ませる。
+絵を見るときは `research/notebooks/fov_sim.ipynb` を開く。球の位置を変えるのは `research/notebooks/fov_scenes.ipynb`。どちらもコネクトームの表は読まない。結合そのものを積分するのは `research/notebooks/gf_loom_sim.ipynb` と `research/notebooks/chemotaxis_sim.ipynb` で、先に [切り出し](scripts/README.md) を済ませる。
 
-ノートはリポジトリ直下か `notebooks/` から開く。
+ノートはリポジトリ直下か `research/notebooks/` から開く。
 
 ### 実機で動かす
 
@@ -64,10 +64,10 @@ python3 -m pytest tests/test_behavior.py tests/test_fov.py
 | `src/flycar/behavior.py` | 半画面の赤と青から、左右の車輪速度 |
 | `src/flycar/fov.py` | 地面の球をカメラへ投影し、車を進める |
 | `src/flycar/view.py` | 俯瞰、カメラ、ニューロンの図 |
-| `notebooks/fov_sim.ipynb` | 基準の 1 場面 |
-| `notebooks/fov_scenes.ipynb` | 球の位置を変えた場面 |
-| `notebooks/gf_loom_sim.ipynb` | loom 回路の結合と DNp01 |
-| `notebooks/chemotaxis_sim.ipynb` | 赤と青の机上走行。車輪則はノート側に別にある |
+| `research/notebooks/fov_sim.ipynb` | 基準の 1 場面 |
+| `research/notebooks/fov_scenes.ipynb` | 球の位置を変えた場面 |
+| `research/notebooks/gf_loom_sim.ipynb` | loom 回路の結合と DNp01 |
+| `research/notebooks/chemotaxis_sim.ipynb` | 赤と青の机上走行。車輪則はノート側に別にある |
 | `tests/` | 固定フレームと基準場面 |
 
 ### 実機を使ったキャプチャの実験
@@ -82,11 +82,11 @@ Uno Q に Brio 100 を載せて 1 枚取る手順は [research/camera_capture_q/
 
 ## システムの解説
 
-走行シミュレーションが毎ステップ掛けているのは、切り出した全シナプスの行列ではない。MaleCNS から残した細胞のうち、赤は DNa02、青は DNp01 で、カメラのカウントをその 4 本の電流にする。結合表を細胞ごとに積分するのは `notebooks/gf_loom_sim.ipynb` である。
+走行シミュレーションが毎ステップ掛けているのは、切り出した全シナプスの行列ではない。MaleCNS から残した細胞のうち、赤は DNa02、青は DNp01 で、カメラのカウントをその 4 本の電流にする。結合表を細胞ごとに積分するのは `research/notebooks/gf_loom_sim.ipynb` である。
 
 ### システム概要
 
-同じ車輪則を、実機のカメラでも、PC 上の球でも使う。感覚のあとを Arduino Uno Q が受け、前処理、コネクトーム、後処理の 3 層で車輪速度まで出す。車輪を回すのは別のマイコンである。赤の占有は同側の DNa02 へ直接入る。青の占有は同側の LC4 と LPLC2 に同じ率で入り、その 2 種は同側の DNp01 にだけ繋がる。走行則では、その正規化した電流を DNp01 へ占有から直接入れている。辺ごとの積和は `notebooks/gf_loom_sim.ipynb` にある。
+同じ車輪則を、実機のカメラでも、PC 上の球でも使う。感覚のあとを Arduino Uno Q が受け、前処理、コネクトーム、後処理の 3 層で車輪速度まで出す。車輪を回すのは別のマイコンである。赤の占有は同側の DNa02 へ直接入る。青の占有は同側の LC4 と LPLC2 に同じ率で入り、その 2 種は同側の DNp01 にだけ繋がる。走行則では、その正規化した電流を DNp01 へ占有から直接入れている。辺ごとの積和は `research/notebooks/gf_loom_sim.ipynb` にある。
 
 ```mermaid
 flowchart TB
