@@ -15,6 +15,20 @@ Servo leftMotor;
 const int RIGHT_MOTOR_PIN = 3;
 const int LEFT_MOTOR_PIN  = 5;
 
+// このシャーシは時計回りが反時計回りより速い。
+// 反時計回り側だけ、1500 µs からの幅にこの倍率をかける。
+// ラジコンの前進。速度 40 では 1.62、速度 67 では 1.17。一つの定数にはまとめていない。
+const double CCW_GAIN = 1.62;
+
+int offsetUs(int pulse, bool ccwWhenPositive) {
+    double span = pulse / 255.0 * 500.0;
+    bool ccw = ccwWhenPositive ? (pulse > 0) : (pulse < 0);
+    if (ccw) {
+        span *= CCW_GAIN;
+    }
+    return (int)span;
+}
+
 enum MCU_RESULT : int {
     MCU_SUCCESS = 0,
     MCU_ERROR = -1
@@ -31,9 +45,9 @@ int setMotorSpeed(int rightPulse, int leftPulse) {
     rightPulse = constrain(rightPulse, -255, 255);
     leftPulse  = constrain(leftPulse,  -255, 255);
 
-    // パルス幅計算（1000〜2000µs）
-    int leftUs  = 1500 - (int)(leftPulse  / 255.0 * 500);  // 左は CCW が全身
-    int rightUs = 1500 + (int)(rightPulse / 255.0 * 500);  // 右は CW が全身
+    // 左の前進は CCW、右の前進は CW。端は 1000〜2000 µs。
+    int leftUs  = constrain(1500 - offsetUs(leftPulse, true), 1000, 2000);
+    int rightUs = constrain(1500 + offsetUs(rightPulse, false), 1000, 2000);
 
     rightMotor.writeMicroseconds(rightUs);
     leftMotor.writeMicroseconds(leftUs);

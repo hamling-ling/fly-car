@@ -8,6 +8,20 @@ static const int RIGHT_MOTOR_PIN = 3;
 static const int LEFT_MOTOR_PIN = 5;
 static const unsigned long WATCHDOG_MS = 450;
 
+// このシャーシは時計回りが反時計回りより速い。
+// 反時計回り側だけ、1500 µs からの幅にこの倍率をかける。
+// ラジコンの前進。速度 40 では 1.62、速度 67 では 1.17。一つの定数にはまとめていない。
+static const double CCW_GAIN = 1.62;
+
+static int offsetUs(int pulse, bool ccwWhenPositive) {
+    double span = pulse / 255.0 * 500.0;
+    bool ccw = ccwWhenPositive ? (pulse > 0) : (pulse < 0);
+    if (ccw) {
+        span *= CCW_GAIN;
+    }
+    return (int)span;
+}
+
 static Servo rightMotor;
 static Servo leftMotor;
 static unsigned long lastCommandMs = 0;
@@ -18,8 +32,8 @@ static bool moving = false;
 static void apply(int rightPulse, int leftPulse) {
     rightPulse = constrain(rightPulse, -255, 255);
     leftPulse = constrain(leftPulse, -255, 255);
-    int leftUs = 1500 - (int)(leftPulse / 255.0 * 500);
-    int rightUs = 1500 + (int)(rightPulse / 255.0 * 500);
+    int leftUs = constrain(1500 - offsetUs(leftPulse, true), 1000, 2000);
+    int rightUs = constrain(1500 + offsetUs(rightPulse, false), 1000, 2000);
     rightMotor.writeMicroseconds(rightUs);
     leftMotor.writeMicroseconds(leftUs);
     if (rightPulse == sentRight && leftPulse == sentLeft) {
