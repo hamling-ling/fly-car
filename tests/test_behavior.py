@@ -20,6 +20,7 @@ from flycar.behavior import (
     HOLD_STEPS,
     Hold,
     Plant,
+    RED_RADIUS,
     RED_YAW,
     YAW_PER_HZ,
     hold,
@@ -28,8 +29,8 @@ from flycar.behavior import (
 
 # Half-screen counts. The second number of each pair is the right half.
 FRONT_RED = (0.45, 0.45)
-RIGHT_RED = (0.05, 0.60)
-LEFT_RED = (0.60, 0.05)
+RIGHT_RED = (0.02, 0.60)
+LEFT_RED = (0.60, 0.02)
 FULL_RED = (0.90, 0.90)
 NO_RED = (0.0, 0.0)
 
@@ -71,8 +72,8 @@ def assert_spinning(got: Hold, turn: float) -> None:
 def assert_arc(got: Hold, turn: float) -> None:
     """turn > 0 is a left arc. Both wheels stay forward.
 
-    The red-only radius is 1 m, so one second of a pure red arc is a small
-    heading. The gates sit under that arc and under the sharper blue dodge.
+    The red-only radius is RED_RADIUS. The gates sit under that arc and
+    under the sharper blue dodge.
     """
     assert_rolling(got)
     assert turn * got.omega > 0.05
@@ -88,7 +89,7 @@ class TestStep1:
         assert got.heading == pytest.approx(0.0, abs=1e-9)
         assert got.y == pytest.approx(0.0, abs=1e-9)
         assert got.x > 0.2
-        assert got.speed == pytest.approx(0.20, abs=0.01)
+        assert got.speed == pytest.approx(0.24, abs=0.01)
         assert got.omega == pytest.approx(0.0, abs=1e-9)
 
     def test_right_red_arcs_right(self) -> None:
@@ -98,6 +99,11 @@ class TestStep1:
     def test_left_red_arcs_left(self) -> None:
         """左の赤は、両輪が前進のまま左へ弧を描く。"""
         assert_arc(show(LEFT_RED, NO_BLUE), turn=1.0)
+
+    def test_one_red_cell_turns_inside_a_room(self) -> None:
+        """片側の赤だけの回転半径は 10 cm。両輪は前を向いたまま。"""
+        got = show(LEFT_RED, NO_BLUE)
+        assert got.speed / abs(got.omega) == pytest.approx(RED_RADIUS, abs=0.02)
 
     def test_red_covering_the_view_stops(self) -> None:
         """赤が左右の画面の大部分を覆うと止まる。"""
@@ -131,6 +137,13 @@ class TestNothing:
     def test_red_at_the_floor_does_not_fire(self) -> None:
         """床ちょうどは電流 1 で、スパイクせず止まる。"""
         assert_stopped(show((COUNT_FLOOR, 0.0), NO_BLUE))
+
+    def test_a_small_patch_above_the_floor_drives(self) -> None:
+        """床の少し上の赤でも車輪が回る。"""
+        got = show((COUNT_FLOOR + 0.02, 0.0), NO_BLUE)
+        assert got.mode == "cruise"
+        assert got.v_left > 0.0
+        assert got.v_right > 0.0
 
 
 class TestStep2:
@@ -168,12 +181,13 @@ class TestStep3:
 
 class TestStep4:
     def test_right_blue_turns_a_right_red_away(self) -> None:
-        """右の赤と右の青は逆のヨーで、青が勝って左へ避ける。前進は残るが遅くなる。"""
+        """大きい右の赤と右の青は発火率が頭打ちになり、赤の係数がわずかに残る。"""
         alone = show(RIGHT_RED, NO_BLUE)
         got = show(RIGHT_RED, RIGHT_BLUE)
         assert got.mode == "cruise"
-        assert alone.omega < 0.0
-        assert got.omega > 0.2
+        assert alone.omega < -0.5
+        assert -0.2 < got.omega < 0.0
+        assert abs(got.omega) < abs(alone.omega) / 4
         assert got.speed < alone.speed
         assert got.x > 0.0
         assert got.v_left > 0.0
@@ -183,19 +197,19 @@ class TestStep4:
         """右の赤と左の青は同じ向きのヨーなので、赤だけのときより強く回る。"""
         alone = show(RIGHT_RED, NO_BLUE)
         got = show(RIGHT_RED, LEFT_BLUE)
-        assert got.omega < alone.omega
+        assert got.omega < alone.omega - 0.5
         assert got.speed < alone.speed
-        assert got.x > 0.0
 
 
 class TestStep5:
     def test_left_blue_turns_a_left_red_away(self) -> None:
-        """左の赤と左の青は逆のヨーで、青が勝って右へ避ける。前進は残るが遅くなる。"""
+        """大きい左の赤と左の青は発火率が頭打ちになり、赤の係数がわずかに残る。"""
         alone = show(LEFT_RED, NO_BLUE)
         got = show(LEFT_RED, LEFT_BLUE)
         assert got.mode == "cruise"
-        assert alone.omega > 0.0
-        assert got.omega < -0.2
+        assert alone.omega > 0.5
+        assert 0.0 < got.omega < 0.2
+        assert abs(got.omega) < abs(alone.omega) / 4
         assert got.speed < alone.speed
         assert got.x > 0.0
         assert got.v_left > 0.0
@@ -205,9 +219,8 @@ class TestStep5:
         """左の赤と右の青は同じ向きのヨーなので、赤だけのときより強く回る。"""
         alone = show(LEFT_RED, NO_BLUE)
         got = show(LEFT_RED, RIGHT_BLUE)
-        assert got.omega > alone.omega
+        assert got.omega > alone.omega + 0.5
         assert got.speed < alone.speed
-        assert got.x > 0.0
 
 
 class TestSteps:

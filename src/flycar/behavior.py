@@ -15,11 +15,12 @@ blue. The wheels read the firing rates directly:
   blue difference. Positive yaw is a left turn, so a right-hand red turns
   right and a right-hand blue turns left
 
-``BLUE_YAW`` is several times ``RED_YAW``, and ``BLUE_FORWARD`` is less than
-one. A one-sided blue therefore turns the car harder than it brakes. That
-is what lets a frontal red and a right-hand blue arc left around the blue
-instead of stalling when the red shifts into the same half. The red-only
-arc is wider than the old equal-weight law.
+``BLUE_FORWARD`` is less than one, so a one-sided blue turns harder than it
+brakes. ``RED_RADIUS`` is 0.10 m: a phone moved across the frame stays in
+view while the heading catches it. ``BLUE_YAW`` is raised with that tighter
+arc so a frontal red and a right-hand blue still pass on the blue's left
+with both wheels forward. At equal firing rates the red yaw coefficient is
+slightly larger than the blue one.
 
 Nothing is firing, so an empty frame and a subthreshold color both stop.
 Equal blue on both sides cancels yaw and subtracts from forward, which is a
@@ -41,14 +42,14 @@ import numpy as np
 # The count references do not. That notebook still divides red counts by
 # 0.25, and it turns a loom rate into current with R_MAX / R_REF. Half-frame
 # fill is not a loom rate, so both colors use a count reference here.
-# A half-count equal to this is current 1. Exactly 1 never spikes. 0.15 matches
-# COUNT_FLOOR, so a color the camera still counts can fire. The old 0.25 left
-# the front-scene red (about 0.19 a side) silent, and the rate law then had
-# nothing to drive the wheels with. The old blue scale (80/50) left a blue
-# that filled about 0.6 of one half below threshold, so avoidance died while
-# the obstacle was still in frame.
-RED_REF = 0.15
-BLUE_REF = 0.15
+# A half-count equal to this is current 1. Exactly 1 never spikes. The
+# reference matches COUNT_FLOOR, so a color the camera still counts can fire.
+# 0.04 is a few percent of one half: a small saturated patch drives. The old
+# 0.15 waited until the phone was close, and 0.25 left the front-scene red
+# (about 0.19 a side) silent. The old blue scale (80/50) left a blue that
+# filled about 0.6 of one half below threshold.
+RED_REF = 0.04
+BLUE_REF = 0.04
 TAU_MS = 5.0
 V_THRESHOLD = 1.0
 REFRAC_MS = 5.0
@@ -61,19 +62,25 @@ TRACK = 0.12
 # Counts. Independent of the synapse ratios above.
 RED_FILL = 0.75
 # Half-frame counts below this are read as empty, before the currents.
-# Tune when the camera is connected.
-COUNT_FLOOR = 0.15
+# Just above the saturated background of this room, so a small phone counts
+# and the dull red in the walls does not.
+COUNT_FLOOR = 0.04
 
-# Front red 0.45/0.45 settles near 167 Hz a side. That sum is 0.20 m/s.
+# Front red 0.45/0.45 saturates near 196 Hz a side. That sum is about 0.24 m/s.
 # FORWARD / (RED_YAW * YAW) is the turning radius while only one red cell
-# is firing, 1 m. It stays above TRACK/2, so that arc keeps both wheels
-# forward. BLUE_YAW / RED_YAW is 6, so the same rate on one blue cell
-# out-turns the red. BLUE_FORWARD leaves forward speed when the rates match.
+# is firing. 0.10 m is small enough that a hand-moved phone stays in frame
+# while the car yaws onto it. 0.15 m still loses that sweep, and 0.30 m
+# never centers a phone 0.40 m ahead. The radius stays above TRACK/2, so
+# both wheels stay forward and the inner one runs at 0.4 times the path
+# speed. BLUE_YAW is high enough that the blue dodge still misses the
+# sphere with both wheels forward. BLUE_FORWARD leaves forward speed when
+# the rates match.
 FORWARD_PER_HZ = 0.0006
 YAW_PER_HZ = 0.0024
-RED_YAW = 0.25
-BLUE_YAW = 1.5
+BLUE_YAW = 2.4
 BLUE_FORWARD = 0.35
+RED_RADIUS = 0.10
+RED_YAW = FORWARD_PER_HZ / (YAW_PER_HZ * RED_RADIUS)
 
 
 def present_count(count: float) -> float:
