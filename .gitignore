@@ -222,3 +222,6 @@ __marimo__/
 # MaleCNS downloads and extracts. See README.
 data/malecns/*
 !data/malecns/.gitkeep
+
+# Color samples collected on the Uno Q. They stay on the board.
+research/color_capture_q/samples/

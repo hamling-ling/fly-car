@@ -74,7 +74,7 @@ python3 -m pytest tests/test_behavior.py tests/test_fov.py
 
 ### 実機を使ったキャプチャの実験
 
-Uno Q に Brio 100 を載せて 1 枚取る手順は [research/camera_capture_q/README.md](research/camera_capture_q/README.md)。スクリプトは `research/camera_capture_q/capture.py`。
+Uno Q に Brio 100 を載せて 1 枚取る手順は [research/camera_capture_q/README.md](research/camera_capture_q/README.md)。スクリプトは `research/camera_capture_q/capture.py`。色の見本をボタンでフォルダに分けるアプリは [research/color_capture_q/README.md](research/color_capture_q/README.md)。
 
 ### 本番の車
 
@@ -232,7 +232,7 @@ $$
 v = \max(0,\ k_v\, u), \qquad \omega = k_\omega\, \psi
 $$
 
-右の赤は $r^{\mathrm{DNa02}}_R$ を増やして右へ回る。右の青は $r^{\mathrm{DNp01}}_R$ を増やして左へ回る。青の和は $\beta_u$ 倍して前進から引く。$\beta_u$ は 1 より小さいので、同じ発火率では赤の和が残る。ヨーでは $\beta_b$ が $\beta_r$ より大きいので、片側の青は、その回避で同じ半画面へ寄った赤より強く回る。負の $u$ は 0 にするので、後退はしない。赤の片側だけが発火しているときの回転半径は $k_v / (\beta_r k_\omega)$ である。
+右の赤は $r^{\mathrm{DNa02}}_R$ を増やして右へ回る。右の青は $r^{\mathrm{DNp01}}_R$ を増やして左へ回る。青の和は $\beta_u$ 倍して前進から引く。$\beta_u$ は 1 より小さいので、同じ発火率では赤の和が残る。赤の半径を縮めた分だけ $\beta_b$ も上げてあり、正面の赤と右の青は、青の左側を両輪前進のまま通る。同じ発火率では $\beta_r$ のほうがわずかに大きい。負の $u$ は 0 にするので、後退はしない。赤の片側だけが発火しているときの回転半径は $k_v / (\beta_r k_\omega)$ である。
 
 例外が一つある。床を通したあと赤の左右がどちらも $c_{\mathrm{stop}}$ 以上なら、発火していても車輪を止める。
 
@@ -254,14 +254,14 @@ $$
 
 | 記号 | コード | 意味 | 値 |
 |---|---|---|---|
-| $\theta$ | `COUNT_FLOOR` | 半画面の占有がこれ未満なら空 | 0.15 |
-| $c_{\mathrm{ref}}$ | `RED_REF`, `BLUE_REF` | この占有で電流が 1 | 0.15 |
+| $\theta$ | `COUNT_FLOOR` | 半画面の占有がこれ未満なら空 | 0.04 |
+| $c_{\mathrm{ref}}$ | `RED_REF`, `BLUE_REF` | この占有で電流が 1 | 0.04 |
 | $\beta_u$ | `BLUE_FORWARD` | 青の和を前進から引く係数 | 0.35 |
-| $\beta_r$ | `RED_YAW` | 赤の左右差のヨー係数 | 0.25 |
-| $\beta_b$ | `BLUE_YAW` | 青の左右差のヨー係数 | 1.5 |
+| $\beta_r$ | `RED_YAW` | 赤の左右差のヨー係数 | 2.5 |
+| $\beta_b$ | `BLUE_YAW` | 青の左右差のヨー係数 | 2.4 |
 | $k_v$ | `FORWARD_PER_HZ` | 発火率から前進速度 | 0.0006 m/s/Hz |
 | $k_\omega$ | `YAW_PER_HZ` | 発火率からヨー角速度 | 0.0024 rad/s/Hz |
 | $c_{\mathrm{stop}}$ | `RED_FILL` | 左右の赤がともにこれ以上なら停止 | 0.75 |
 | $d$ | `TRACK` | 軌間 | 0.12 m |
 
-赤だけが片側で発火しているときの回転半径 $k_v / (\beta_r k_\omega)$ は 1 m。
+赤だけが片側で発火しているときの回転半径 $k_v / (\beta_r k_\omega)$ は 0.10 m。手で動かしたスマホが画面から出る前に、向きが追いつく大きさである。軌間の半分より大きいので両輪は前を向き、内側は経路速度の 0.4 倍になる。

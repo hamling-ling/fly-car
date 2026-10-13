@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>色の矩形</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #16181d;
+      --panel: #23262e;
+      --line: #3a3f4a;
+      --text: #f2f3f5;
+      --muted: #a7adba;
+      --held: #e2a100;
+      --held-ink: #1c1400;
+      --danger: #d4554a;
+      --red: #ff4d4d;
+      --blue: #3aa0ff;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Noto Sans CJK JP", "Hiragino Sans", "Yu Gothic", sans-serif;
+    }
+    main {
+      display: grid;
+      gap: 16px;
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 16px;
+    }
+    @media (min-width: 860px) {
+      main { grid-template-columns: minmax(0, 1fr) 320px; align-items: start; }
+    }
+    h1 { font-size: 1.25rem; font-weight: 650; margin: 0 0 8px; }
+    .view {
+      position: relative;
+      background: #000;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      overflow: hidden;
+      aspect-ratio: 16 / 9;
+    }
+    .view img, .view svg {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+    }
+    .view img { object-fit: contain; background: #000; }
+    .view svg { touch-action: none; }
+    .view.live svg, .view.review svg { pointer-events: none; }
+    .view.frozen svg { cursor: crosshair; }
+    .view.review svg { cursor: default; }
+    input[type="range"] { width: 100%; margin: 4px 0 8px; }
+    [hidden] { display: none !important; }
+    .camera-note { color: var(--danger); min-height: 1.4em; margin: 8px 0 0; }
+    .readout {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      margin-top: 8px;
+      color: var(--muted);
+      font-variant-numeric: tabular-nums;
+    }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 16px;
+    }
+    label { display: block; color: var(--muted); margin: 0 0 6px; }
+    input[type="text"] {
+      width: 100%;
+      margin-bottom: 14px;
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #1b1e25;
+      color: var(--text);
+      font: inherit;
+    }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
+    button {
+      min-height: 46px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #2c303a;
+      color: var(--text);
+      font: inherit;
+    }
+    button.held, button[aria-pressed="true"] {
+      background: var(--held);
+      color: var(--held-ink);
+      border-color: var(--held);
+    }
+    button.red[aria-pressed="true"] { background: var(--red); color: #2a0000; border-color: var(--red); }
+    button.blue[aria-pressed="true"] { background: var(--blue); color: #041018; border-color: var(--blue); }
+    button:disabled { opacity: 0.55; }
+    .coords { margin: 8px 0 12px; color: var(--muted); font-variant-numeric: tabular-nums; line-height: 1.6; }
+    .coords b { font-weight: 650; }
+    .red-ink { color: var(--red); }
+    .blue-ink { color: var(--blue); }
+    .hint { color: var(--muted); font-size: 0.92rem; line-height: 1.5; margin: 12px 0 0; }
+    #save { min-height: 1.4em; margin: 12px 0 0; }
+  </style>
+</head>
+<body>
+  <main>
+    <section>
+      <h1>色の矩形</h1>
+      <div class="view live" id="stage">
+        <img id="camera" alt="車載カメラ">
+        <svg id="overlay" viewBox="0 0 1280 720" preserveAspectRatio="xMidYMid meet"></svg>
+      </div>
+      <p id="camera-note" class="camera-note"></p>
+      <div class="readout">
+        <span id="exposure">露出 取得待ち</span>
+        <span id="frames"></span>
+      </div>
+    </section>
+    <section class="panel">
+      <label for="note">メモ</label>
+      <input id="note" type="text" maxlength="80" placeholder="距離や照明。空でも保存できる" autocomplete="off">
+      <div class="row">
+        <button type="button" id="freeze">絵を止める</button>
+        <button type="button" id="live" disabled>ライブに戻る</button>
+      </div>
+      <div class="row">
+        <button type="button" class="red" id="tool-red" disabled>赤の矩形</button>
+        <button type="button" class="blue" id="tool-blue" disabled>青の矩形</button>
+      </div>
+      <div class="row">
+        <button type="button" id="clear-red" disabled>赤を消す</button>
+        <button type="button" id="clear-blue" disabled>青を消す</button>
+      </div>
+      <p class="coords" id="coords">矩形は、絵を止めてから描く。</p>
+      <button type="button" id="keep" disabled>この矩形で保存</button>
+      <button type="button" id="keep-neither" disabled>赤も青も写っていない</button>
+      <p id="save"></p>
+      <button type="button" id="open-review">保存した絵を見る</button>
+      <div id="review-tools" hidden>
+        <div class="row">
+          <button type="button" id="review-prev">前</button>
+          <button type="button" id="review-next">次</button>
+        </div>
+        <input id="review-range" type="range" min="1" max="1" value="1">
+        <p class="coords" id="review-pos"></p>
+        <div class="row">
+          <button type="button" class="red" id="make-red">赤にする</button>
+          <button type="button" class="blue" id="make-blue">青にする</button>
+        </div>
+        <button type="button" id="delete-mark">この枚を消す</button>
+        <button type="button" id="close-review">撮影に戻る</button>
+      </div>
+      <p class="hint">止めた絵にドラッグする。赤と青はどちらか一方でも保存できる。シャッターとゲインは止めた瞬間の値。画素にガンマは掛けない。保存後は「保存した絵を見る」で矩形を確認できる。</p>
+    </section>
+  </main>
+  <script>
+    const SVG_NS = "http://www.w3.org/2000/svg";
+    const MIN_SIDE = 8;
+    const stage = document.getElementById("stage");
+    const camera = document.getElementById("camera");
+    const overlay = document.getElementById("overlay");
+    const note = document.getElementById("note");
+    const save = document.getElementById("save");
+    const exposure = document.getElementById("exposure");
+    const frames = document.getElementById("frames");
+    const cameraNote = document.getElementById("camera-note");
+    const coords = document.getElementById("coords");
+    const freezeButton = document.getElementById("freeze");
+    const liveButton = document.getElementById("live");
+    const keepButton = document.getElementById("keep");
+    const keepNeither = document.getElementById("keep-neither");
+    const toolRed = document.getElementById("tool-red");
+    const toolBlue = document.getElementById("tool-blue");
+    const clearRed = document.getElementById("clear-red");
+    const clearBlue = document.getElementById("clear-blue");
+    const openReviewButton = document.getElementById("open-review");
+    const reviewTools = document.getElementById("review-tools");
+    const reviewPrev = document.getElementById("review-prev");
+    const reviewNext = document.getElementById("review-next");
+    const reviewRange = document.getElementById("review-range");
+    const reviewPos = document.getElementById("review-pos");
+    const makeRed = document.getElementById("make-red");
+    const makeBlue = document.getElementById("make-blue");
+    const deleteMark = document.getElementById("delete-mark");
+    const closeReviewButton = document.getElementById("close-review");
+
+    let busy = false;
+    let frozen = false;
+    let tool = "red";
+    let frameW = 1280;
+    let frameH = 720;
+    let rects = { red: null, blue: null };
+    let drag = null;
+    let booted = false;
+    let reviewing = false;
+    let marks = [];
+    let reviewAt = 0;
+
+    function shutterText(body) {
+      const mean = body.mean == null ? "—" : Number(body.mean).toFixed(1);
+      const shutter = body.exposure_time_absolute == null
+        ? "—"
+        : (body.exposure_time_absolute / 10).toFixed(1) + " ms";
+      const gain = body.gain == null ? "—" : String(body.gain);
+      const prefix = frozen ? "止めたときの " : "";
+      return prefix + "平均 " + mean + "　シャッター " + shutter + "　ゲイン " + gain;
+    }
+
+    function placeText(rect) {
+      if (!rect) return "未設定";
+      return rect.x + "," + rect.y + "　" + rect.width + "×" + rect.height;
+    }
+
+    function paint() {
+      overlay.replaceChildren();
+      const shown = [];
+      if (rects.red) shown.push({ ...rects.red, color: "#ff4d4d" });
+      if (rects.blue) shown.push({ ...rects.blue, color: "#3aa0ff" });
+      if (drag) shown.push({ ...drag.rect, color: drag.tool === "red" ? "#ff4d4d" : "#3aa0ff" });
+      for (const item of shown) {
+        const rect = document.createElementNS(SVG_NS, "rect");
+        rect.setAttribute("x", item.x);
+        rect.setAttribute("y", item.y);
+        rect.setAttribute("width", item.width);
+        rect.setAttribute("height", item.height);
+        rect.setAttribute("fill", item.color);
+        rect.setAttribute("fill-opacity", "0.22");
+        rect.setAttribute("stroke", item.color);
+        rect.setAttribute("stroke-width", "2");
+        rect.setAttribute("vector-effect", "non-scaling-stroke");
+        overlay.append(rect);
+      }
+      coords.innerHTML =
+        '<span class="red-ink">赤</span> ' + placeText(rects.red) +
+        "<br><span class=\"blue-ink\">青</span> " + placeText(rects.blue);
+      const ready = frozen && !reviewing && (rects.red || rects.blue);
+      keepButton.disabled = busy || !ready;
+      keepNeither.disabled = busy || reviewing || !frozen || Boolean(rects.red) || Boolean(rects.blue);
+      clearRed.disabled = busy || !rects.red;
+      clearBlue.disabled = busy || !rects.blue;
+      toolRed.setAttribute("aria-pressed", tool === "red" && frozen ? "true" : "false");
+      toolBlue.setAttribute("aria-pressed", tool === "blue" && frozen ? "true" : "false");
+    }
+
+    function setFrameSize(width, height) {
+      frameW = width;
+      frameH = height;
+      overlay.setAttribute("viewBox", "0 0 " + width + " " + height);
+    }
+
+    function showLive() {
+      frozen = false;
+      rects = { red: null, blue: null };
+      drag = null;
+      stage.classList.add("live");
+      stage.classList.remove("frozen");
+      camera.src = "/stream";
+      freezeButton.disabled = false;
+      liveButton.disabled = true;
+      toolRed.disabled = true;
+      toolBlue.disabled = true;
+      paint();
+    }
+
+    function showFrozen(body) {
+      frozen = true;
+      if (body.width && body.height) setFrameSize(body.width, body.height);
+      stage.classList.remove("live");
+      stage.classList.add("frozen");
+      camera.src = "/still?t=" + Date.now();
+      exposure.textContent = shutterText(body);
+      freezeButton.disabled = true;
+      liveButton.disabled = false;
+      toolRed.disabled = false;
+      toolBlue.disabled = false;
+      paint();
+    }
+
+    function clientToImage(event) {
+      const point = overlay.createSVGPoint();
+      point.x = event.clientX;
+      point.y = event.clientY;
+      const matrix = overlay.getScreenCTM();
+      if (!matrix) return { x: 0, y: 0 };
+      const mapped = point.matrixTransform(matrix.inverse());
+      return {
+        x: Math.min(frameW, Math.max(0, mapped.x)),
+        y: Math.min(frameH, Math.max(0, mapped.y)),
+      };
+    }
+
+    function boxOf(start, end) {
+      const x = Math.max(0, Math.round(Math.min(start.x, end.x)));
+      const y = Math.max(0, Math.round(Math.min(start.y, end.y)));
+      const right = Math.min(frameW, Math.round(Math.max(start.x, end.x)));
+      const bottom = Math.min(frameH, Math.round(Math.max(start.y, end.y)));
+      return { x, y, width: Math.max(0, right - x), height: Math.max(0, bottom - y) };
+    }
+
+    overlay.addEventListener("pointerdown", (event) => {
+      if (!frozen || busy || reviewing) return;
+      const start = clientToImage(event);
+      drag = { tool, start, rect: { x: Math.round(start.x), y: Math.round(start.y), width: 0, height: 0 } };
+      overlay.setPointerCapture(event.pointerId);
+      paint();
+    });
+
+    overlay.addEventListener("pointermove", (event) => {
+      if (!drag) return;
+      drag.rect = boxOf(drag.start, clientToImage(event));
+      paint();
+    });
+
+    function endDrag(event) {
+      if (!drag) return;
+      const drawn = boxOf(drag.start, clientToImage(event));
+      const which = drag.tool;
+      drag = null;
+      if (drawn.width >= MIN_SIDE && drawn.height >= MIN_SIDE) rects[which] = drawn;
+      paint();
+    }
+
+    overlay.addEventListener("pointerup", endDrag);
+    overlay.addEventListener("pointercancel", () => {
+      drag = null;
+      paint();
+    });
+
+    function selectTool(next) {
+      tool = next;
+      paint();
+    }
+
+    toolRed.addEventListener("click", () => selectTool("red"));
+    toolBlue.addEventListener("click", () => selectTool("blue"));
+    clearRed.addEventListener("click", () => { rects.red = null; paint(); });
+    clearBlue.addEventListener("click", () => { rects.blue = null; paint(); });
+
+    async function post(path, params) {
+      const query = params ? "?" + params.toString() : "";
+      const res = await fetch(path + query, { method: "POST" });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.detail || String(res.status));
+      return body;
+    }
+
+    freezeButton.addEventListener("click", async () => {
+      if (busy || frozen) return;
+      busy = true;
+      freezeButton.disabled = true;
+      save.textContent = "絵を止めています";
+      try {
+        const body = await post("/freeze");
+        rects = { red: null, blue: null };
+        showFrozen(body);
+        save.textContent = "止めた。赤か青を選んでドラッグする。";
+      } catch (err) {
+        freezeButton.disabled = false;
+        save.textContent = "止められなかった。" + err.message;
+      } finally {
+        busy = false;
+        paint();
+      }
+    });
+
+    liveButton.addEventListener("click", async () => {
+      if (busy || !frozen) return;
+      busy = true;
+      save.textContent = "ライブに戻しています";
+      try {
+        await post("/discard");
+        showLive();
+        save.textContent = "";
+      } catch (err) {
+        save.textContent = "戻せなかった。" + err.message;
+      } finally {
+        busy = false;
+        paint();
+      }
+    });
+
+    keepNeither.addEventListener("click", async () => {
+      if (busy || !frozen || rects.red || rects.blue) return;
+      busy = true;
+      keepNeither.disabled = true;
+      save.textContent = "保存しています";
+      try {
+        const body = await post("/save", new URLSearchParams({ note: note.value, neither: "1" }));
+        save.textContent = "赤も青も無い絵を保存した。" + body.count + " 枚目。" + shutterText(body);
+      } catch (err) {
+        save.textContent = "保存できなかった。" + err.message;
+      } finally {
+        busy = false;
+        paint();
+      }
+    });
+
+    keepButton.addEventListener("click", async () => {
+      if (busy || !frozen || (!rects.red && !rects.blue)) return;
+      busy = true;
+      keepButton.disabled = true;
+      save.textContent = "保存しています";
+      const params = new URLSearchParams({ note: note.value });
+      for (const name of ["red", "blue"]) {
+        const rect = rects[name];
+        if (!rect) continue;
+        params.set(name + "_x", String(rect.x));
+        params.set(name + "_y", String(rect.y));
+        params.set(name + "_w", String(rect.width));
+        params.set(name + "_h", String(rect.height));
+      }
+      try {
+        const body = await post("/save", params);
+        save.textContent = "保存した。" + body.count + " 枚目。" + shutterText(body);
+      } catch (err) {
+        save.textContent = "保存できなかった。" + err.message;
+      } finally {
+        busy = false;
+        paint();
+      }
+    });
+
+    async function refresh() {
+      try {
+        const res = await fetch("/status");
+        if (!res.ok) throw new Error(String(res.status));
+        const body = await res.json();
+        if (!booted) {
+          booted = true;
+          if (body.frozen) showFrozen(body);
+          else showLive();
+        }
+        if (!frozen && !reviewing) exposure.textContent = shutterText(body);
+        frames.textContent = body.marked
+          ? "保存 " + body.marked + " 枚"
+          : (body.frames ? body.frames + " 枚見た" : "フレーム待ち");
+        cameraNote.textContent = body.camera_error || "";
+      } catch (err) {
+        cameraNote.textContent = "状態を取得できない。" + err.message;
+      }
+    }
+
+    function stampClock(stamp) {
+      return stamp.slice(9, 11) + ":" + stamp.slice(11, 13) + ":" + stamp.slice(13, 15);
+    }
+
+    function showMark() {
+      const item = marks[reviewAt];
+      reviewRange.max = String(Math.max(1, marks.length));
+      reviewRange.value = String(marks.length ? reviewAt + 1 : 1);
+      reviewPrev.disabled = reviewAt <= 0;
+      reviewNext.disabled = reviewAt >= marks.length - 1;
+      if (!item) {
+        reviewPos.textContent = "保存はまだ無い";
+        makeRed.disabled = true;
+        makeBlue.disabled = true;
+        deleteMark.disabled = true;
+        rects = { red: null, blue: null };
+        paint();
+        return;
+      }
+      setFrameSize(item.width || 1280, item.height || 720);
+      camera.src = "/mark?stamp=" + encodeURIComponent(item.stamp) + "&t=" + Date.now();
+      rects = { red: item.red || null, blue: item.blue || null };
+      drag = null;
+      stage.classList.remove("live");
+      stage.classList.add("review");
+      stage.classList.remove("frozen");
+      exposure.textContent = shutterText(item).replace("止めたときの ", "");
+      const which = item.neither ? "赤も青も無い" : item.red && item.blue ? "赤と青" : item.red ? "赤" : item.blue ? "青" : "矩形なし";
+      reviewPos.textContent = (reviewAt + 1) + " / " + marks.length + "　" + stampClock(item.stamp) + "　" + which;
+      const single = Boolean(item.red) !== Boolean(item.blue);
+      makeRed.disabled = !single || Boolean(item.red);
+      makeBlue.disabled = !single || Boolean(item.blue);
+      deleteMark.disabled = false;
+      paint();
+    }
+
+    async function openReview() {
+      if (busy) return;
+      busy = true;
+      save.textContent = "保存を読んでいます";
+      try {
+        const res = await fetch("/marks");
+        const body = await res.json();
+        if (!res.ok) throw new Error(body.detail || String(res.status));
+        marks = body.marks || [];
+        reviewAt = Math.min(reviewAt, Math.max(0, marks.length - 1));
+        reviewing = true;
+        reviewTools.hidden = false;
+        openReviewButton.hidden = true;
+        freezeButton.disabled = true;
+        liveButton.disabled = true;
+        toolRed.disabled = true;
+        toolBlue.disabled = true;
+        showMark();
+        save.textContent = "左右のキーでも送れる。色が違えば赤か青に直せる。";
+      } catch (err) {
+        save.textContent = "保存を読めなかった。" + err.message;
+      } finally {
+        busy = false;
+      }
+    }
+
+    function closeReview() {
+      reviewing = false;
+      reviewTools.hidden = true;
+      openReviewButton.hidden = false;
+      stage.classList.remove("review");
+      if (frozen) showFrozen({
+        width: frameW,
+        height: frameH,
+        mean: null,
+        exposure_time_absolute: null,
+        gain: null,
+      });
+      else showLive();
+      save.textContent = "";
+    }
+
+    async function moveReview(step) {
+      const next = reviewAt + step;
+      if (!reviewing || next < 0 || next >= marks.length) return;
+      reviewAt = next;
+      showMark();
+    }
+
+    async function relabelCurrent(color) {
+      const item = marks[reviewAt];
+      if (!item || busy) return;
+      busy = true;
+      save.textContent = "色を直しています";
+      try {
+        const body = await post("/relabel", new URLSearchParams({ stamp: item.stamp, color }));
+        marks[reviewAt] = body;
+        showMark();
+        save.textContent = stampClock(item.stamp) + " を" + (color === "red" ? "赤" : "青") + "にした。";
+      } catch (err) {
+        save.textContent = "直せなかった。" + err.message;
+      } finally {
+        busy = false;
+      }
+    }
+
+    async function deleteCurrent() {
+      const item = marks[reviewAt];
+      if (!item || busy) return;
+      if (!window.confirm(stampClock(item.stamp) + " の絵を消す？")) return;
+      busy = true;
+      save.textContent = "消しています";
+      try {
+        await post("/delete", new URLSearchParams({ stamp: item.stamp }));
+        marks.splice(reviewAt, 1);
+        if (reviewAt >= marks.length) reviewAt = Math.max(0, marks.length - 1);
+        showMark();
+        save.textContent = "消した。残り " + marks.length + " 枚。";
+      } catch (err) {
+        save.textContent = "消せなかった。" + err.message;
+      } finally {
+        busy = false;
+      }
+    }
+
+    openReviewButton.addEventListener("click", openReview);
+    closeReviewButton.addEventListener("click", closeReview);
+    reviewPrev.addEventListener("click", () => moveReview(-1));
+    reviewNext.addEventListener("click", () => moveReview(1));
+    reviewRange.addEventListener("input", () => {
+      reviewAt = Number(reviewRange.value) - 1;
+      showMark();
+    });
+    makeRed.addEventListener("click", () => relabelCurrent("red"));
+    makeBlue.addEventListener("click", () => relabelCurrent("blue"));
+    deleteMark.addEventListener("click", deleteCurrent);
+    document.addEventListener("keydown", (event) => {
+      if (!reviewing || event.target.matches("input, textarea")) return;
+      if (event.key === "ArrowLeft") moveReview(-1);
+      if (event.key === "ArrowRight") moveReview(1);
+    });
+
+    paint();
+    refresh();
+    setInterval(refresh, 2000);
+  </script>
+</body>
+</html>
