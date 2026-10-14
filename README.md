@@ -53,7 +53,7 @@ python3 -m pytest tests/test_behavior.py tests/test_fov.py
 
 ### 実機で動かす
 
-本番のアプリは `src/flycar_q/`。起動は [src/flycar_q/README.md](src/flycar_q/README.md)。カメラのフレームを 0.10 秒ごとに左右の赤と青にし、0.02 秒ごとに `Plant.steps` を呼んでパルスをマイコンへ送る。色の範囲と、m/s からパルスへの倍率は、まだ床で合わせていない。ラジコンとモーターの確認は `research/` に残してある。
+本番のアプリは `src/flycar_q/`。起動は [src/flycar_q/README.md](src/flycar_q/README.md)。カメラのフレームを 0.10 秒ごとに左右の赤と青にし、0.02 秒ごとに `Plant.steps` を呼んでパルスをマイコンへ送る。色の範囲は `src/flycar/color_thresholds.json` にあり、`occupancy.py` が読む。`research/color_capture_q/fit_thresholds.py` が色紙の4点からこのファイルを書く。床での走行と、m/s からパルスへの倍率は、まだ合わせていない。ラジコンとモーターの確認は `research/` に残してある。
 
 ## 内容物
 
@@ -62,7 +62,7 @@ python3 -m pytest tests/test_behavior.py tests/test_fov.py
 | 場所 | 内容 |
 |---|---|
 | `src/flycar/behavior.py` | 半画面の赤と青から、左右の車輪速度。`Plant.steps` は 20 ms 分 |
-| `src/flycar/occupancy.py` | カメラ画像の赤と青の半画面占有 |
+| `src/flycar/occupancy.py` | カメラ画像の赤と青の半画面占有。下限は隣の `color_thresholds.json` |
 | `src/flycar/pulse.py` | 車輪の m/s をサーボのパルスにする |
 | `src/flycar/fov.py` | 地面の球をカメラへ投影し、車を進める |
 | `src/flycar/view.py` | 俯瞰、カメラ、ニューロンの図 |

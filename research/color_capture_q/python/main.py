@@ -1,4 +1,4 @@
-"""止めたカメラ画像に、赤と青の矩形を付けて保存する。
+"""止めたカメラ画像に、赤と青の4点を付けて保存する。
 
 車輪は動かさない。画素はカメラのバッファのまま。ガンマは掛けない。
 シャッターとゲインは、絵を止めた瞬間のカメラの値を記録する。
@@ -19,7 +19,7 @@ from arduino.app_peripherals.camera import Camera
 from fastapi import HTTPException
 from fastapi.responses import Response
 
-from rects import rects_for_save, relabel_single
+from rects import quads_for_save, relabel_single
 
 # capture.py で映った Brio 100 の MJPG。640x480 は露出が上がる前だとほぼ黒だった。
 STREAM_SIZE = (1280, 720)
@@ -278,17 +278,11 @@ def still():
 
 def save(
     note: str = "",
-    red_x: str = "",
-    red_y: str = "",
-    red_w: str = "",
-    red_h: str = "",
-    blue_x: str = "",
-    blue_y: str = "",
-    blue_w: str = "",
-    blue_h: str = "",
+    red_points: str = "",
+    blue_points: str = "",
     neither: str = "",
 ) -> dict:
-    """Write the held JPEG and the rectangles from that same moment."""
+    """Write the held JPEG and the quadrilaterals from that same moment."""
     text = clean_note(note)
     empty = str(neither).strip() in ("1", "true")
     with save_lock:
@@ -297,13 +291,7 @@ def save(
             raise HTTPException(status_code=400, detail="先に絵を止める")
         height, width = int(frame.shape[0]), int(frame.shape[1])
         try:
-            red, blue = rects_for_save(
-                (red_x, red_y, red_w, red_h),
-                (blue_x, blue_y, blue_w, blue_h),
-                width,
-                height,
-                empty,
-            )
+            red, blue = quads_for_save(red_points, blue_points, width, height, empty)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         now = datetime.now().astimezone()

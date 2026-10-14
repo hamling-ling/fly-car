@@ -1,7 +1,7 @@
 # App Lab のアプリ。Web UI はポート 7000。スケッチは無い。
 
 name: color_capture_q
-description: 止めた絵に赤と青の矩形を描いて保存する
+description: 止めた絵に赤と青の4点を置いて保存する
 icon: 📷
 ports: []
 bricks:

@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 import cv2
@@ -17,6 +18,11 @@ from sklearn.linear_model import LinearRegression
 ROOT = Path(__file__).resolve().parent
 MARKED = ROOT / "samples" / "marked"
 OUT = ROOT / "samples" / "check"
+PY = ROOT / "python"
+if str(PY) not in sys.path:
+    sys.path.insert(0, str(PY))
+
+from rects import region_mask  # noqa: E402
 
 
 def load_shots() -> list[dict]:
@@ -50,9 +56,9 @@ def load_shots() -> list[dict]:
 
 
 def rect_stats(image: np.ndarray, rect: dict) -> tuple[np.ndarray, np.ndarray]:
-    """矩形の中の BGR 平均と、成分ごとの標準偏差。"""
-    x, y, w, h = rect["x"], rect["y"], rect["width"], rect["height"]
-    patch = image[y : y + h, x : x + w].reshape(-1, 3).astype(np.float64)
+    """囲いの中の BGR 平均と、成分ごとの標準偏差。"""
+    region = region_mask(image.shape[0], image.shape[1], rect)
+    patch = image[region].reshape(-1, 3).astype(np.float64)
     return patch.mean(axis=0), patch.std(axis=0)
 
 
@@ -93,13 +99,9 @@ def match(image: np.ndarray, mean: np.ndarray, width: np.ndarray) -> np.ndarray:
 def fraction(mask: np.ndarray, rect: dict | None = None, inside: bool = True) -> float:
     if rect is None:
         return float(mask.mean())
-    x, y, w, h = rect["x"], rect["y"], rect["width"], rect["height"]
-    region = mask[y : y + h, x : x + w]
-    outside = mask.copy()
-    outside[y : y + h, x : x + w] = False
-    if inside:
-        return float(region.mean()) if region.size else 0.0
-    return float(outside.mean())
+    region = region_mask(mask.shape[0], mask.shape[1], rect)
+    chosen = mask[region] if inside else mask[~region]
+    return float(chosen.mean()) if chosen.size else 0.0
 
 
 def overlay(image: np.ndarray, red: np.ndarray, blue: np.ndarray) -> np.ndarray:

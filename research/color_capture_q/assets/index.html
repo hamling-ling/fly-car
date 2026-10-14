@@ -131,15 +131,16 @@
         <button type="button" id="live" disabled>ライブに戻る</button>
       </div>
       <div class="row">
-        <button type="button" class="red" id="tool-red" disabled>赤の矩形</button>
-        <button type="button" class="blue" id="tool-blue" disabled>青の矩形</button>
+        <button type="button" class="red" id="tool-red" disabled>赤の4点</button>
+        <button type="button" class="blue" id="tool-blue" disabled>青の4点</button>
       </div>
       <div class="row">
         <button type="button" id="clear-red" disabled>赤を消す</button>
         <button type="button" id="clear-blue" disabled>青を消す</button>
       </div>
-      <p class="coords" id="coords">矩形は、絵を止めてから描く。</p>
-      <button type="button" id="keep" disabled>この矩形で保存</button>
+      <button type="button" id="undo-point" disabled>直前の点を消す</button>
+      <p class="coords" id="coords">4点は、絵を止めてから輪郭の順にたたく。</p>
+      <button type="button" id="keep" disabled>この4点で保存</button>
       <button type="button" id="keep-neither" disabled>赤も青も写っていない</button>
       <p id="save"></p>
       <button type="button" id="open-review">保存した絵を見る</button>
@@ -157,7 +158,7 @@
         <button type="button" id="delete-mark">この枚を消す</button>
         <button type="button" id="close-review">撮影に戻る</button>
       </div>
-      <p class="hint">止めた絵にドラッグする。赤と青はどちらか一方でも保存できる。シャッターとゲインは止めた瞬間の値。画素にガンマは掛けない。保存後は「保存した絵を見る」で矩形を確認できる。</p>
+      <p class="hint">止めた絵の輪郭を順に4点たたく。斜めの紙も囲える。赤と青はどちらか一方でも保存できる。点は打った順につながり、交差する4点は受け付けない。シャッターとゲインは止めた瞬間の値。画素にガンマは掛けない。保存後は「保存した絵を見る」で4点を確認できる。</p>
     </section>
   </main>
   <script>
@@ -180,6 +181,7 @@
     const toolBlue = document.getElementById("tool-blue");
     const clearRed = document.getElementById("clear-red");
     const clearBlue = document.getElementById("clear-blue");
+    const undoPoint = document.getElementById("undo-point");
     const openReviewButton = document.getElementById("open-review");
     const reviewTools = document.getElementById("review-tools");
     const reviewPrev = document.getElementById("review-prev");
@@ -196,8 +198,9 @@
     let tool = "red";
     let frameW = 1280;
     let frameH = 720;
-    let rects = { red: null, blue: null };
-    let drag = null;
+    let quads = { red: null, blue: null };
+    let drafts = { red: [], blue: [] };
+    let hover = null;
     let booted = false;
     let reviewing = false;
     let marks = [];
@@ -213,38 +216,97 @@
       return prefix + "平均 " + mean + "　シャッター " + shutter + "　ゲイン " + gain;
     }
 
-    function placeText(rect) {
-      if (!rect) return "未設定";
-      return rect.x + "," + rect.y + "　" + rect.width + "×" + rect.height;
+    function placeText(points) {
+      if (!points || !points.length) return "未設定";
+      const listed = points.map((point) => point.x + "," + point.y).join(" → ");
+      return points.length === 4 ? listed : listed + "　(" + points.length + "/4)";
+    }
+
+    function shoelace(points) {
+      let sum = 0;
+      for (let index = 0; index < points.length; index += 1) {
+        const start = points[index];
+        const end = points[(index + 1) % points.length];
+        sum += start.x * end.y - end.x * start.y;
+      }
+      return Math.abs(sum) / 2;
+    }
+
+    function segmentsCross(a, b, c, d) {
+      function cross(origin, first, second) {
+        return (first.x - origin.x) * (second.y - origin.y) - (first.y - origin.y) * (second.x - origin.x);
+      }
+      return cross(a, b, c) * cross(a, b, d) < 0 && cross(c, d, a) * cross(c, d, b) < 0;
+    }
+
+    function quadError(points) {
+      if (points.length !== 4) return "4点たたく";
+      const bowtie = segmentsCross(points[0], points[1], points[2], points[3])
+        || segmentsCross(points[1], points[2], points[3], points[0]);
+      if (bowtie) return "4点が交差している。輪郭の順にたたき直す。";
+      if (shoelace(points) < MIN_SIDE * MIN_SIDE) return "範囲が小さすぎる";
+      return "";
+    }
+
+    function drawMark(points, color, closed) {
+      if (points.length >= 2) {
+        const shape = document.createElementNS(SVG_NS, closed ? "polygon" : "polyline");
+        shape.setAttribute("points", points.map((point) => point.x + "," + point.y).join(" "));
+        shape.setAttribute("fill", closed ? color : "none");
+        shape.setAttribute("fill-opacity", closed ? "0.22" : "0");
+        shape.setAttribute("stroke", color);
+        shape.setAttribute("stroke-width", "2");
+        shape.setAttribute("vector-effect", "non-scaling-stroke");
+        overlay.append(shape);
+      }
+      points.forEach((point, index) => {
+        const dot = document.createElementNS(SVG_NS, "circle");
+        dot.setAttribute("cx", String(point.x));
+        dot.setAttribute("cy", String(point.y));
+        dot.setAttribute("r", "6");
+        dot.setAttribute("fill", color);
+        overlay.append(dot);
+        const label = document.createElementNS(SVG_NS, "text");
+        label.setAttribute("x", String(point.x + 10));
+        label.setAttribute("y", String(point.y - 10));
+        label.setAttribute("fill", color);
+        label.setAttribute("font-size", "22");
+        label.textContent = String(index + 1);
+        overlay.append(label);
+      });
+    }
+
+    function activePoints(name) {
+      return quads[name] || drafts[name];
     }
 
     function paint() {
       overlay.replaceChildren();
-      const shown = [];
-      if (rects.red) shown.push({ ...rects.red, color: "#ff4d4d" });
-      if (rects.blue) shown.push({ ...rects.blue, color: "#3aa0ff" });
-      if (drag) shown.push({ ...drag.rect, color: drag.tool === "red" ? "#ff4d4d" : "#3aa0ff" });
-      for (const item of shown) {
-        const rect = document.createElementNS(SVG_NS, "rect");
-        rect.setAttribute("x", item.x);
-        rect.setAttribute("y", item.y);
-        rect.setAttribute("width", item.width);
-        rect.setAttribute("height", item.height);
-        rect.setAttribute("fill", item.color);
-        rect.setAttribute("fill-opacity", "0.22");
-        rect.setAttribute("stroke", item.color);
-        rect.setAttribute("stroke-width", "2");
-        rect.setAttribute("vector-effect", "non-scaling-stroke");
-        overlay.append(rect);
+      drawMark(activePoints("red"), "#ff4d4d", Boolean(quads.red));
+      drawMark(activePoints("blue"), "#3aa0ff", Boolean(quads.blue));
+      const draft = drafts[tool];
+      if (frozen && !reviewing && hover && draft.length > 0 && draft.length < 4) {
+        const last = draft[draft.length - 1];
+        const line = document.createElementNS(SVG_NS, "line");
+        line.setAttribute("x1", String(last.x));
+        line.setAttribute("y1", String(last.y));
+        line.setAttribute("x2", String(hover.x));
+        line.setAttribute("y2", String(hover.y));
+        line.setAttribute("stroke", tool === "red" ? "#ff4d4d" : "#3aa0ff");
+        line.setAttribute("stroke-width", "2");
+        line.setAttribute("vector-effect", "non-scaling-stroke");
+        overlay.append(line);
       }
       coords.innerHTML =
-        '<span class="red-ink">赤</span> ' + placeText(rects.red) +
-        "<br><span class=\"blue-ink\">青</span> " + placeText(rects.blue);
-      const ready = frozen && !reviewing && (rects.red || rects.blue);
+        '<span class="red-ink">赤</span> ' + placeText(activePoints("red")) +
+        "<br><span class=\"blue-ink\">青</span> " + placeText(activePoints("blue"));
+      const drafting = drafts.red.length > 0 || drafts.blue.length > 0;
+      const ready = frozen && !reviewing && !drafting && (quads.red || quads.blue);
       keepButton.disabled = busy || !ready;
-      keepNeither.disabled = busy || reviewing || !frozen || Boolean(rects.red) || Boolean(rects.blue);
-      clearRed.disabled = busy || !rects.red;
-      clearBlue.disabled = busy || !rects.blue;
+      keepNeither.disabled = busy || reviewing || !frozen || drafting || Boolean(quads.red) || Boolean(quads.blue);
+      clearRed.disabled = busy || (!quads.red && drafts.red.length === 0);
+      clearBlue.disabled = busy || (!quads.blue && drafts.blue.length === 0);
+      undoPoint.disabled = busy || reviewing || !frozen || (drafts[tool].length === 0 && !quads[tool]);
       toolRed.setAttribute("aria-pressed", tool === "red" && frozen ? "true" : "false");
       toolBlue.setAttribute("aria-pressed", tool === "blue" && frozen ? "true" : "false");
     }
@@ -257,8 +319,9 @@
 
     function showLive() {
       frozen = false;
-      rects = { red: null, blue: null };
-      drag = null;
+      quads = { red: null, blue: null };
+      drafts = { red: [], blue: [] };
+      hover = null;
       stage.classList.add("live");
       stage.classList.remove("frozen");
       camera.src = "/stream";
@@ -291,46 +354,53 @@
       if (!matrix) return { x: 0, y: 0 };
       const mapped = point.matrixTransform(matrix.inverse());
       return {
-        x: Math.min(frameW, Math.max(0, mapped.x)),
-        y: Math.min(frameH, Math.max(0, mapped.y)),
+        x: Math.min(frameW - 1, Math.max(0, Math.round(mapped.x))),
+        y: Math.min(frameH - 1, Math.max(0, Math.round(mapped.y))),
       };
     }
 
-    function boxOf(start, end) {
-      const x = Math.max(0, Math.round(Math.min(start.x, end.x)));
-      const y = Math.max(0, Math.round(Math.min(start.y, end.y)));
-      const right = Math.min(frameW, Math.round(Math.max(start.x, end.x)));
-      const bottom = Math.min(frameH, Math.round(Math.max(start.y, end.y)));
-      return { x, y, width: Math.max(0, right - x), height: Math.max(0, bottom - y) };
+    function pointsOf(mark) {
+      if (!mark) return null;
+      if (Array.isArray(mark.points) && mark.points.length === 4) {
+        return mark.points.map((point) => ({ x: point[0], y: point[1] }));
+      }
+      if (!mark.width || !mark.height) return null;
+      const right = mark.x + mark.width;
+      const bottom = mark.y + mark.height;
+      return [
+        { x: mark.x, y: mark.y },
+        { x: right, y: mark.y },
+        { x: right, y: bottom },
+        { x: mark.x, y: bottom },
+      ];
     }
 
     overlay.addEventListener("pointerdown", (event) => {
-      if (!frozen || busy || reviewing) return;
-      const start = clientToImage(event);
-      drag = { tool, start, rect: { x: Math.round(start.x), y: Math.round(start.y), width: 0, height: 0 } };
-      overlay.setPointerCapture(event.pointerId);
+      if (!frozen || busy || reviewing || quads[tool]) return;
+      const placed = clientToImage(event);
+      const next = drafts[tool].concat([placed]);
+      if (next.length < 4) {
+        drafts[tool] = next;
+        save.textContent = (tool === "red" ? "赤" : "青") + " " + next.length + "/4";
+        paint();
+        return;
+      }
+      const error = quadError(next);
+      if (error) {
+        save.textContent = error;
+        paint();
+        return;
+      }
+      drafts[tool] = [];
+      quads[tool] = next;
+      save.textContent = (tool === "red" ? "赤" : "青") + "を4点で囲んだ。";
       paint();
     });
 
     overlay.addEventListener("pointermove", (event) => {
-      if (!drag) return;
-      drag.rect = boxOf(drag.start, clientToImage(event));
-      paint();
-    });
-
-    function endDrag(event) {
-      if (!drag) return;
-      const drawn = boxOf(drag.start, clientToImage(event));
-      const which = drag.tool;
-      drag = null;
-      if (drawn.width >= MIN_SIDE && drawn.height >= MIN_SIDE) rects[which] = drawn;
-      paint();
-    }
-
-    overlay.addEventListener("pointerup", endDrag);
-    overlay.addEventListener("pointercancel", () => {
-      drag = null;
-      paint();
+      if (!frozen || reviewing) return;
+      hover = clientToImage(event);
+      if (drafts[tool].length > 0 && drafts[tool].length < 4) paint();
     });
 
     function selectTool(next) {
@@ -340,8 +410,23 @@
 
     toolRed.addEventListener("click", () => selectTool("red"));
     toolBlue.addEventListener("click", () => selectTool("blue"));
-    clearRed.addEventListener("click", () => { rects.red = null; paint(); });
-    clearBlue.addEventListener("click", () => { rects.blue = null; paint(); });
+    function clearColor(name) {
+      quads[name] = null;
+      drafts[name] = [];
+      paint();
+    }
+
+    clearRed.addEventListener("click", () => clearColor("red"));
+    clearBlue.addEventListener("click", () => clearColor("blue"));
+    undoPoint.addEventListener("click", () => {
+      if (drafts[tool].length > 0) {
+        drafts[tool] = drafts[tool].slice(0, -1);
+      } else if (quads[tool]) {
+        drafts[tool] = quads[tool].slice(0, 3);
+        quads[tool] = null;
+      }
+      paint();
+    });
 
     async function post(path, params) {
       const query = params ? "?" + params.toString() : "";
@@ -358,9 +443,10 @@
       save.textContent = "絵を止めています";
       try {
         const body = await post("/freeze");
-        rects = { red: null, blue: null };
+        quads = { red: null, blue: null };
+        drafts = { red: [], blue: [] };
         showFrozen(body);
-        save.textContent = "止めた。赤か青を選んでドラッグする。";
+        save.textContent = "止めた。赤か青を選んで、輪郭を順に4点たたく。";
       } catch (err) {
         freezeButton.disabled = false;
         save.textContent = "止められなかった。" + err.message;
@@ -387,7 +473,7 @@
     });
 
     keepNeither.addEventListener("click", async () => {
-      if (busy || !frozen || rects.red || rects.blue) return;
+      if (busy || !frozen || quads.red || quads.blue || drafts.red.length || drafts.blue.length) return;
       busy = true;
       keepNeither.disabled = true;
       save.textContent = "保存しています";
@@ -403,18 +489,15 @@
     });
 
     keepButton.addEventListener("click", async () => {
-      if (busy || !frozen || (!rects.red && !rects.blue)) return;
+      if (busy || !frozen || (!quads.red && !quads.blue)) return;
       busy = true;
       keepButton.disabled = true;
       save.textContent = "保存しています";
       const params = new URLSearchParams({ note: note.value });
       for (const name of ["red", "blue"]) {
-        const rect = rects[name];
-        if (!rect) continue;
-        params.set(name + "_x", String(rect.x));
-        params.set(name + "_y", String(rect.y));
-        params.set(name + "_w", String(rect.width));
-        params.set(name + "_h", String(rect.height));
+        const points = quads[name];
+        if (!points) continue;
+        params.set(name + "_points", points.map((point) => point.x + "," + point.y).join(","));
       }
       try {
         const body = await post("/save", params);
@@ -462,14 +545,16 @@
         makeRed.disabled = true;
         makeBlue.disabled = true;
         deleteMark.disabled = true;
-        rects = { red: null, blue: null };
+        quads = { red: null, blue: null };
+        drafts = { red: [], blue: [] };
         paint();
         return;
       }
       setFrameSize(item.width || 1280, item.height || 720);
       camera.src = "/mark?stamp=" + encodeURIComponent(item.stamp) + "&t=" + Date.now();
-      rects = { red: item.red || null, blue: item.blue || null };
-      drag = null;
+      quads = { red: pointsOf(item.red), blue: pointsOf(item.blue) };
+      drafts = { red: [], blue: [] };
+      hover = null;
       stage.classList.remove("live");
       stage.classList.add("review");
       stage.classList.remove("frozen");

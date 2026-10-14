@@ -1,0 +1,29 @@
+{
+  "red": {
+    "saturation": 120,
+    "value": 50,
+    "hue_low": 10,
+    "hue_wrap": 326
+  },
+  "blue": {
+    "saturation": 140,
+    "value": 30,
+    "hue_low": 210,
+    "hue_high": 240
+  },
+  "fit": {
+    "recall_floor": 0.8,
+    "red": {
+      "n": 38,
+      "worst": 0.824409,
+      "worst_stamp": "20261014T132549_255",
+      "median": 1.0
+    },
+    "blue": {
+      "n": 32,
+      "worst": 0.909651,
+      "worst_stamp": "20261014T134306_703",
+      "median": 1.0
+    }
+  }
+}

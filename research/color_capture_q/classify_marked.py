@@ -1,21 +1,17 @@
-"""samples/marked を、見た目で決めた色相・彩度・明度で赤と青に分ける。
+"""samples/marked を、色紙の四角形から求めた色相・彩度・明度で赤と青に分ける。
 
-この数字は矩形から一意に計算したものではない。人間が見て赤か、水色か、
-壁か、木かで切った値である。OpenCV の色相は 0 から 179 なので、度は 2 倍する。
+数字は ``src/flycar/color_thresholds.json`` にあり、``flycar.occupancy`` が読む。
+``fit_thresholds.py`` がそのファイルを書く。OpenCV の色相は 0 から 179 なので、度は 2 倍する。
 
-明るい赤: 彩度 120 以上、明度 190 以上、色相 30 度以下または 350 度以上。
-暗い赤:   彩度 150 以上、明度 130 以上、色相 20 度以下または 350 度以上。
-青:       彩度 100 以上、明度 230 以上、色相 180 度以上 240 度以下。
-薄い水色: 彩度 30 以上、明度 230 以上、色相 170 度以上 190 度以下。
-
-肌は色相が赤でも彩度は 80 から 100 にとどまる。暗い赤のスマホは彩度 155 以上。
-薄い水色の画面は色相が 180 度付近に寄る。彩度の下限を青全体で下げると、
-同じ彩度の壁まで青になる。
+色紙の赤は色相 340 度付近に寄る。スマホの薄い水色は色相 180 度付近で、ここには入らない。
+同じ色相と彩度のモニタや本の背は青になる。色相 30 度の木、彩度 80 前後の肌、
+クリーム色の壁は入らない。
 """
 
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 import cv2
@@ -24,21 +20,15 @@ import numpy as np
 ROOT = Path(__file__).resolve().parent
 MARKED = ROOT / "samples" / "marked"
 OUT = ROOT / "samples" / "check_hsv"
+SRC = ROOT.parents[1] / "src"
+PY = ROOT / "python"
+for path in (SRC, PY):
+    if str(path) not in sys.path:
+        sys.path.insert(0, str(path))
 
-RED_S_BRIGHT = 120
-RED_S_DARK = 150
-BLUE_S = 100
-PALE_S = 30
-RED_V_BRIGHT = 190
-RED_V_DARK = 130
-BLUE_V = 230
-RED_H_BRIGHT = 30
-RED_H_DARK = 20
-RED_H_WRAP = 350
-BLUE_H_LOW = 180
-BLUE_H_HIGH = 240
-PALE_H_LOW = 170
-PALE_H_HIGH = 190
+from flycar.occupancy import color_masks  # noqa: E402
+from rects import region_mask  # noqa: E402
+
 HALF_FLOOR = 0.04
 
 
@@ -70,23 +60,14 @@ def load_shots() -> list[dict]:
 
 
 def classify(image: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """画素ごとの赤と青。色相の範囲は重ならない。"""
-    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
-    hue = hsv[:, :, 0].astype(np.int16) * 2
-    saturation = hsv[:, :, 1]
-    value = hsv[:, :, 2]
-    bright = (saturation >= RED_S_BRIGHT) & (value >= RED_V_BRIGHT) & ((hue <= RED_H_BRIGHT) | (hue >= RED_H_WRAP))
-    dark = (saturation >= RED_S_DARK) & (value >= RED_V_DARK) & ((hue <= RED_H_DARK) | (hue >= RED_H_WRAP))
-    red = bright | dark
-    blue = (hue >= BLUE_H_LOW) & (hue <= BLUE_H_HIGH) & (saturation >= BLUE_S) & (value >= BLUE_V)
-    pale = (hue >= PALE_H_LOW) & (hue <= PALE_H_HIGH) & (saturation >= PALE_S) & (value >= BLUE_V)
-    return red, blue | pale
+    """画素ごとの赤と青。しきい値は ``flycar.occupancy`` と同じ。"""
+    return color_masks(image)
 
 
 def fraction(mask: np.ndarray, rect: dict) -> float:
-    x, y, w, h = rect["x"], rect["y"], rect["width"], rect["height"]
-    region = mask[y : y + h, x : x + w]
-    return float(region.mean()) if region.size else 0.0
+    region = region_mask(mask.shape[0], mask.shape[1], rect)
+    chosen = mask[region]
+    return float(chosen.mean()) if chosen.size else 0.0
 
 
 def overlay(image: np.ndarray, red: np.ndarray, blue: np.ndarray) -> np.ndarray:

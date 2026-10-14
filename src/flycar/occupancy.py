@@ -5,36 +5,102 @@ A real frame is counted the other way: the fraction of pixels in that half
 whose color falls in the red or blue range. Position inside the half does
 not matter.
 
-OpenCV hue runs from 0 to 179. Red wraps past 0, so it is two intervals.
-The bounds match the 2026-10-12 phone-screen samples in this room.
-A phone is a bright flat field. Skin is the same hue but dimmer, and the
-bookshelf is saturated but darker and, for blue, a higher hue.
+The gates are read once from ``color_thresholds.json`` beside this file.
+``research/color_capture_q/fit_thresholds.py`` writes that file. Restart the
+app after replacing it. Hue in the file is degrees. OpenCV stores half of that.
+
+The paper's red sits near hue 340. A pale phone cyan near hue 180 is not
+this blue. A monitor or book spine in the same hue and saturation still
+matches. Wood at hue 30, skin near saturation 80, and the cream wall stay
+outside.
 """
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import cv2
 import numpy as np
 
-# Inclusive HSV bounds. OpenCV hue is 0..179.
-# Red phone screens in the samples sit near hue 6..14, saturation about 100,
-# value 245..255. Skin in the same light is hue about 8 and value about 214,
-# so the value floor keeps it under the 0.04 count floor. Dark book spines
-# are saturated red at value about 80 and fall out the same way.
-# Hue stops at 14. The wooden door is about 16, and hue 15 filled wood before.
-RED_LO = (0, 95, 245)
-RED_HI = (14, 255, 255)
-RED_WRAP_LO = (170, 95, 245)
-RED_WRAP_HI = (179, 255, 255)
-# Cyan phone screens are hue about 90..103. Book spines in the background
-# sample peak at hue 111..114 with value about 100. Pure blue is hue 120
-# and is on the book side of that gap, so it is not a target.
-BLUE_LO = (88, 80, 180)
-BLUE_HI = (106, 255, 255)
+THRESHOLDS_PATH = Path(__file__).with_name("color_thresholds.json")
 
 
-def _bounds(low: tuple[int, int, int], high: tuple[int, int, int]) -> tuple[np.ndarray, np.ndarray]:
-    return np.array(low, dtype=np.uint8), np.array(high, dtype=np.uint8)
+def _mapping(raw: object, label: str) -> dict:
+    if not isinstance(raw, dict):
+        raise ValueError(f"{label} がオブジェクトではない")
+    return raw
+
+
+def _integer(block: dict, key: str, low: int, high: int, label: str) -> int:
+    if key not in block:
+        raise ValueError(f"{label} に {key} が無い")
+    value = block[key]
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"{label} の {key} が整数ではない")
+    if value < low or value > high:
+        raise ValueError(f"{label} の {key} が範囲外")
+    return value
+
+
+def load_cuts(path: Path) -> dict[str, int]:
+    """Read the eight gates. Hue is in degrees, saturation and value are 0..255."""
+    if not path.is_file():
+        raise FileNotFoundError(f"色の設定が無い: {path}")
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"色の設定が JSON ではない: {path}") from exc
+    document = _mapping(raw, path.name)
+    red = _mapping(document.get("red"), "赤")
+    blue = _mapping(document.get("blue"), "青")
+    red_s = _integer(red, "saturation", 0, 255, "赤")
+    red_v = _integer(red, "value", 0, 255, "赤")
+    red_low = _integer(red, "hue_low", -1, 360, "赤")
+    red_wrap = _integer(red, "hue_wrap", 0, 360, "赤")
+    blue_s = _integer(blue, "saturation", 0, 255, "青")
+    blue_v = _integer(blue, "value", 0, 255, "青")
+    blue_low = _integer(blue, "hue_low", 0, 360, "青")
+    blue_high = _integer(blue, "hue_high", 0, 360, "青")
+    if blue_low > blue_high:
+        raise ValueError("青の色相の下限が上限を超えている")
+    return {
+        "RED_S": red_s,
+        "RED_V": red_v,
+        "RED_H_LOW": red_low,
+        "RED_H_WRAP": red_wrap,
+        "BLUE_S": blue_s,
+        "BLUE_V": blue_v,
+        "BLUE_H_LOW": blue_low,
+        "BLUE_H_HIGH": blue_high,
+    }
+
+
+_CUTS = load_cuts(THRESHOLDS_PATH)
+RED_S = _CUTS["RED_S"]
+BLUE_S = _CUTS["BLUE_S"]
+RED_V = _CUTS["RED_V"]
+BLUE_V = _CUTS["BLUE_V"]
+RED_H_LOW = _CUTS["RED_H_LOW"]
+RED_H_WRAP = _CUTS["RED_H_WRAP"]
+BLUE_H_LOW = _CUTS["BLUE_H_LOW"]
+BLUE_H_HIGH = _CUTS["BLUE_H_HIGH"]
+
+
+def color_masks(frame_bgr: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Return boolean red and blue masks for a uint8 BGR frame."""
+    frame = np.asarray(frame_bgr)
+    if frame.ndim != 3 or frame.shape[2] != 3:
+        raise ValueError("frame must be a BGR image")
+    if frame.dtype != np.uint8:
+        raise ValueError("frame must be uint8")
+    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    hue = hsv[:, :, 0].astype(np.int16) * 2
+    saturation = hsv[:, :, 1]
+    value = hsv[:, :, 2]
+    red = (saturation >= RED_S) & (value >= RED_V) & ((hue <= RED_H_LOW) | (hue >= RED_H_WRAP))
+    blue = (hue >= BLUE_H_LOW) & (hue <= BLUE_H_HIGH) & (saturation >= BLUE_S) & (value >= BLUE_V)
+    return red, blue
 
 
 def _fill(mask: np.ndarray, x0: int, x1: int) -> float:
@@ -50,24 +116,13 @@ def half_counts(frame_bgr: np.ndarray, *, mirror: bool = False) -> tuple[float, 
     Column 0 is the left of the image. ``mirror`` swaps the halves after
     counting, for a camera whose picture is flipped left to right.
     """
-    frame = np.asarray(frame_bgr)
-    if frame.ndim != 3 or frame.shape[2] != 3:
-        raise ValueError("frame must be a BGR image")
-    if frame.dtype != np.uint8:
-        raise ValueError("frame must be uint8")
-    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-    red_lo, red_hi = _bounds(RED_LO, RED_HI)
-    wrap_lo, wrap_hi = _bounds(RED_WRAP_LO, RED_WRAP_HI)
-    blue_lo, blue_hi = _bounds(BLUE_LO, BLUE_HI)
-    red = cv2.inRange(hsv, red_lo, red_hi)
-    red = cv2.bitwise_or(red, cv2.inRange(hsv, wrap_lo, wrap_hi))
-    blue = cv2.inRange(hsv, blue_lo, blue_hi)
-    mid = frame.shape[1] // 2
+    red, blue = color_masks(frame_bgr)
+    mid = red.shape[1] // 2
     counts = (
         _fill(red, 0, mid),
-        _fill(red, mid, frame.shape[1]),
+        _fill(red, mid, red.shape[1]),
         _fill(blue, 0, mid),
-        _fill(blue, mid, frame.shape[1]),
+        _fill(blue, mid, red.shape[1]),
     )
     if not mirror:
         return counts
