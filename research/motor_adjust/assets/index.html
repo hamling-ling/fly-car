@@ -1,0 +1,697 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>車輪の調整</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #16181d;
+      --panel: #23262e;
+      --line: #3a3f4a;
+      --text: #f2f3f5;
+      --muted: #a7adba;
+      --held: #e2a100;
+      --held-ink: #1c1400;
+      --danger: #d4554a;
+      --right: #7eb6ff;
+      --left: #e2a100;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Noto Sans CJK JP", "Hiragino Sans", "Yu Gothic", sans-serif;
+    }
+    main {
+      display: grid;
+      gap: 16px;
+      max-width: 920px;
+      margin: 0 auto;
+      padding: 16px;
+    }
+    @media (min-width: 800px) {
+      main { grid-template-columns: minmax(0, 1fr) 320px; align-items: start; }
+    }
+    h1 { font-size: 1.25rem; font-weight: 650; margin: 0 0 8px; }
+    h2 { font-size: 1rem; font-weight: 650; margin: 0; }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 16px;
+    }
+    .rows { display: grid; gap: 14px; }
+    .row {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 10px 12px 12px;
+    }
+    .row.right { border-color: #3d5274; }
+    .row.left { border-color: #6a5524; }
+    .row h2 { margin-bottom: 8px; }
+    .controls {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 96px;
+      gap: 8px;
+      align-items: center;
+    }
+    input[type="number"] {
+      width: 100%;
+      padding: 8px 10px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #2c303a;
+      color: var(--text);
+      font: inherit;
+      font-size: 1.35rem;
+      font-variant-numeric: tabular-nums;
+    }
+    input[type="range"] { width: 100%; accent-color: var(--held); }
+    .sent { margin: 8px 0 0; color: var(--muted); font-variant-numeric: tabular-nums; }
+    .readout {
+      display: grid;
+      gap: 6px;
+      margin-top: 14px;
+      color: var(--muted);
+      font-variant-numeric: tabular-nums;
+    }
+    .readout strong { color: var(--text); font-weight: 650; }
+    .pad {
+      display: grid;
+      grid-template-columns: repeat(3, 72px);
+      grid-template-rows: repeat(3, 72px);
+      gap: 8px;
+      justify-content: center;
+      margin: 8px 0;
+      touch-action: none;
+      user-select: none;
+    }
+    button {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #2c303a;
+      color: var(--text);
+      font: inherit;
+      font-size: 1.35rem;
+    }
+    button.held, button:active { background: var(--held); color: var(--held-ink); border-color: var(--held); }
+    button.stop { font-size: 0.95rem; }
+    .hint { color: var(--muted); font-size: 0.92rem; line-height: 1.5; margin: 8px 0 0; }
+    .link-off { color: var(--danger); }
+    .span { grid-column: 1 / -1; }
+    .measure {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: end;
+    }
+    .measure label {
+      display: grid;
+      gap: 4px;
+      color: var(--muted);
+      font-size: 0.92rem;
+    }
+    .measure input[type="number"] { width: 7.5rem; font-size: 1.1rem; }
+    .measure button { padding: 8px 12px; }
+    table.trials {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 12px;
+    }
+    table.trials th, table.trials td {
+      text-align: right;
+      padding: 4px 8px;
+      border-bottom: 1px solid var(--line);
+      font-variant-numeric: tabular-nums;
+    }
+    table.trials th:first-child, table.trials td:first-child { text-align: left; }
+    pre.raw {
+      margin: 8px 0 0;
+      white-space: pre-wrap;
+      color: var(--muted);
+      font-size: 0.85rem;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <section class="panel">
+      <h1>車輪の調整</h1>
+      <div class="rows">
+        <div class="row right" data-name="forward_right">
+          <h2>右の前進</h2>
+          <div class="controls">
+            <input type="range" min="0" max="255" step="1" value="150" aria-label="右の前進">
+            <input type="number" min="0" max="255" step="1" value="150" inputmode="numeric">
+          </div>
+          <p class="sent"></p>
+        </div>
+        <div class="row left" data-name="forward_left">
+          <h2>左の前進</h2>
+          <div class="controls">
+            <input type="range" min="0" max="255" step="1" value="149" aria-label="左の前進">
+            <input type="number" min="0" max="255" step="1" value="149" inputmode="numeric">
+          </div>
+          <p class="sent"></p>
+        </div>
+        <div class="row right" data-name="back_right">
+          <h2>右の後退</h2>
+          <div class="controls">
+            <input type="range" min="0" max="255" step="1" value="91" aria-label="右の後退">
+            <input type="number" min="0" max="255" step="1" value="91" inputmode="numeric">
+          </div>
+          <p class="sent"></p>
+        </div>
+        <div class="row left" data-name="back_left">
+          <h2>左の後退</h2>
+          <div class="controls">
+            <input type="range" min="0" max="255" step="1" value="77" aria-label="左の後退">
+            <input type="number" min="0" max="255" step="1" value="77" inputmode="numeric">
+          </div>
+          <p class="sent"></p>
+        </div>
+      </div>
+      <div class="readout">
+        <span id="motion">停止</span>
+        <span>今 右 <strong id="now-right">0</strong>　左 <strong id="now-left">0</strong></span>
+      </div>
+      <p class="hint">この数が <code>setMotorSpeed</code> にそのまま渡る。前進は正、後退は負。前進は 150 まで、後退は 100 までにすると、今回の車輪では左右が揃いやすい。</p>
+    </section>
+    <section class="panel">
+      <div class="pad" id="pad">
+        <span></span>
+        <button type="button" data-dir="up" aria-label="前進">↑</button>
+        <span></span>
+        <button type="button" data-dir="left" aria-label="左旋回">←</button>
+        <button type="button" class="stop" id="stop" aria-label="停止">停止</button>
+        <button type="button" data-dir="right" aria-label="右旋回">→</button>
+        <span></span>
+        <button type="button" data-dir="down" aria-label="後退">↓</button>
+        <span></span>
+      </div>
+      <p class="hint">矢印キーか W A S D。離すと止まる。スペースでも止まる。欄にいるとき、上下キーはその数を 1 変える。通信が切れるとボード側でも止まる。</p>
+      <p id="link" class="hint">操作 接続待ち</p>
+    </section>
+    <section class="panel span">
+      <h2>直進の計測</h2>
+      <div class="measure">
+        <label>秒
+          <input id="trial-sec" type="number" min="0.2" max="3" step="0.1" value="0.8">
+        </label>
+        <label>前 mm
+          <input id="front-mm" type="number" step="1" inputmode="decimal">
+        </label>
+        <label>後ろ mm
+          <input id="rear-mm" type="number" step="1" inputmode="decimal">
+        </label>
+        <label>間隔 mm
+          <input id="length-mm" type="number" min="50" max="500" step="1" value="170">
+        </label>
+        <button type="button" id="run-trial">測る</button>
+        <button type="button" id="save-trial">記録</button>
+        <button type="button" id="undo-trial">直前を消す</button>
+        <button type="button" id="clear-trial">全部消す</button>
+      </div>
+      <p id="trial-note" class="hint">出発線に合わせて測る。右の前進と左の前進を、その秒数だけ送って止まる。</p>
+      <div id="trial-table"></div>
+      <pre id="trial-raw" class="raw"></pre>
+      <p class="hint">走っている姿では判断しない。止まったら、出発線からの横ずれを mm で読む。右が正。前後が同じだけずれていれば向きは 0。前だけ右なら左輪が速い。同じ左右で 8 回。平均の 95% 区間が 0 を含めば、この回数では曲がりと区別できない。アプリを止めると記録は消える。</p>
+    </section>
+  </main>
+  <script>
+    const MAP = {
+      ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right",
+      w: "up", W: "up", a: "left", A: "left", s: "down", S: "down", d: "right", D: "right",
+    };
+    const LABELS = {
+      "": "停止",
+      "up": "前進",
+      "down": "後退",
+      "left": "左旋回",
+      "right": "右旋回",
+      "up+right": "右へ曲がりながら前進",
+      "up+left": "左へ曲がりながら前進",
+      "down+right": "右へ曲がりながら後退",
+      "down+left": "左へ曲がりながら後退",
+    };
+    const NAMES = ["forward_right", "forward_left", "back_right", "back_left"];
+    const STORE = "motor-adjust-direct-v1";
+    const commands = {
+      forward_right: 150,
+      forward_left: 149,
+      back_right: 91,
+      back_left: 77,
+    };
+    const sources = new Set();
+    const held = new Set();
+    const motion = document.getElementById("motion");
+    const link = document.getElementById("link");
+    let timer = null;
+    let inflight = false;
+    let pending = false;
+
+    function clamp(value) {
+      const n = Number(value);
+      if (!Number.isInteger(n) || n < 0) return 0;
+      if (n > 255) return 255;
+      return n;
+    }
+
+    function microseconds(command) {
+      const span = Math.trunc((Math.abs(command) / 255) * 500);
+      if (command > 0) return 1500 + span;
+      if (command < 0) return 1500 - span;
+      return 1500;
+    }
+
+    function signed(direction, forwardMag, backMag) {
+      if (direction > 0) return clamp(forwardMag);
+      if (direction < 0) return -clamp(backMag);
+      return 0;
+    }
+
+    function sentNow() {
+      const forward = (held.has("up") ? 1 : 0) - (held.has("down") ? 1 : 0);
+      const yaw = (held.has("right") ? 1 : 0) - (held.has("left") ? 1 : 0);
+      return [
+        signed(forward - yaw, commands.forward_right, commands.back_right),
+        signed(forward + yaw, commands.forward_left, commands.back_left),
+      ];
+    }
+
+    function label() {
+      const forward = (held.has("up") ? 1 : 0) - (held.has("down") ? 1 : 0);
+      const yaw = (held.has("right") ? 1 : 0) - (held.has("left") ? 1 : 0);
+      const parts = [];
+      if (forward > 0) parts.push("up");
+      else if (forward < 0) parts.push("down");
+      if (yaw > 0) parts.push("right");
+      else if (yaw < 0) parts.push("left");
+      return LABELS[parts.join("+")] || "停止";
+    }
+
+    function writeFields() {
+      for (const name of NAMES) {
+        const row = document.querySelector('.row[data-name="' + name + '"]');
+        row.querySelector('input[type="range"]').value = String(commands[name]);
+        row.querySelector('input[type="number"]').value = String(commands[name]);
+      }
+    }
+
+    function recall() {
+      let saved = null;
+      try {
+        saved = JSON.parse(sessionStorage.getItem(STORE) || "null");
+      } catch (err) {
+        saved = null;
+      }
+      if (!saved) return;
+      for (const name of NAMES) {
+        const n = Number(saved[name]);
+        if (Number.isInteger(n) && n >= 0 && n <= 255) commands[name] = n;
+      }
+      writeFields();
+    }
+
+    function remember() {
+      sessionStorage.setItem(STORE, JSON.stringify(commands));
+    }
+
+    function paint() {
+      motion.textContent = label();
+      for (const button of document.querySelectorAll("#pad button[data-dir]")) {
+        button.classList.toggle("held", held.has(button.dataset.dir));
+      }
+      for (const name of NAMES) {
+        const sign = name.startsWith("back") ? -1 : 1;
+        const command = sign * commands[name];
+        const row = document.querySelector('.row[data-name="' + name + '"]');
+        row.querySelector(".sent").textContent = "送る値 " + command + "（" + microseconds(command) + " µs）";
+      }
+      const now = sentNow();
+      document.getElementById("now-right").textContent = String(now[0]);
+      document.getElementById("now-left").textContent = String(now[1]);
+    }
+
+    function typing() {
+      const el = document.activeElement;
+      return !!el && el.tagName === "INPUT";
+    }
+
+    function typed(input) {
+      const raw = input.value.trim();
+      if (!/^\d+$/.test(raw)) return null;
+      const n = Number(raw);
+      if (n > 255) return null;
+      return n;
+    }
+
+    function recompute() {
+      held.clear();
+      for (const source of sources) {
+        const dir = source.startsWith("pad:") ? source.slice(4) : MAP[source];
+        if (dir) held.add(dir);
+      }
+    }
+
+    async function send() {
+      if (inflight) {
+        pending = true;
+        return;
+      }
+      inflight = true;
+      const params = new URLSearchParams({
+        up: held.has("up") ? "1" : "0",
+        down: held.has("down") ? "1" : "0",
+        left: held.has("left") ? "1" : "0",
+        right: held.has("right") ? "1" : "0",
+        forward_right: String(commands.forward_right),
+        forward_left: String(commands.forward_left),
+        back_right: String(commands.back_right),
+        back_left: String(commands.back_left),
+      });
+      try {
+        const res = await fetch("/drive?" + params.toString(), { method: "POST" });
+        if (!res.ok) throw new Error(String(res.status));
+        const body = await res.json();
+        if (body.error) {
+          link.textContent = "車輪に届いていません";
+          link.classList.add("link-off");
+        } else {
+          link.textContent = "操作 接続";
+          link.classList.remove("link-off");
+        }
+      } catch (err) {
+        link.textContent = "操作 切断";
+        link.classList.add("link-off");
+      } finally {
+        inflight = false;
+        if (pending) {
+          pending = false;
+          send();
+        }
+      }
+    }
+
+    function ensureHeartbeat() {
+      if (held.size === 0) {
+        if (timer) {
+          clearInterval(timer);
+          timer = null;
+        }
+        return;
+      }
+      if (!timer) timer = setInterval(send, 200);
+    }
+
+    function setSource(source, down) {
+      const had = sources.has(source);
+      if (down) sources.add(source);
+      else sources.delete(source);
+      if (sources.has(source) === had) return;
+      recompute();
+      paint();
+      send();
+      ensureHeartbeat();
+    }
+
+    function stopAll() {
+      sources.clear();
+      recompute();
+      paint();
+      send();
+      ensureHeartbeat();
+      fetch("/abort", { method: "POST" }).catch(() => {});
+    }
+
+    function setCommand(name, n) {
+      commands[name] = n;
+      const row = document.querySelector('.row[data-name="' + name + '"]');
+      row.querySelector('input[type="range"]').value = String(n);
+      row.querySelector('input[type="number"]').value = String(n);
+      remember();
+      paint();
+      if (held.size) send();
+    }
+
+    window.addEventListener("keydown", (event) => {
+      if (event.key === " " && !typing()) {
+        event.preventDefault();
+        if (!event.repeat) stopAll();
+        return;
+      }
+      if (typing()) return;
+      if (!MAP[event.key] || event.repeat) return;
+      event.preventDefault();
+      setSource(event.key, true);
+    });
+    window.addEventListener("keyup", (event) => {
+      if (!MAP[event.key] || typing()) return;
+      event.preventDefault();
+      setSource(event.key, false);
+    });
+    window.addEventListener("blur", stopAll);
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) stopAll();
+    });
+
+    for (const row of document.querySelectorAll(".row")) {
+      const name = row.dataset.name;
+      const range = row.querySelector('input[type="range"]');
+      const number = row.querySelector('input[type="number"]');
+      range.addEventListener("input", () => setCommand(name, Number(range.value)));
+      number.addEventListener("focus", () => number.select());
+      number.addEventListener("input", () => {
+        const n = typed(number);
+        if (n === null) return;
+        commands[name] = n;
+        range.value = String(n);
+        remember();
+        paint();
+        if (held.size) send();
+      });
+      number.addEventListener("change", () => {
+        const n = typed(number);
+        if (n === null) {
+          number.value = String(commands[name]);
+          return;
+        }
+        setCommand(name, n);
+      });
+    }
+
+    for (const button of document.querySelectorAll("#pad button[data-dir]")) {
+      button.addEventListener("pointerdown", (event) => {
+        event.preventDefault();
+        button.setPointerCapture(event.pointerId);
+        setSource("pad:" + button.dataset.dir, true);
+      });
+      const release = (event) => {
+        event.preventDefault();
+        setSource("pad:" + button.dataset.dir, false);
+      };
+      button.addEventListener("pointerup", release);
+      button.addEventListener("pointercancel", release);
+      button.addEventListener("lostpointercapture", release);
+    }
+    document.getElementById("stop").addEventListener("pointerdown", (event) => {
+      event.preventDefault();
+      stopAll();
+    });
+
+    const trialNote = document.getElementById("trial-note");
+    const trialTable = document.getElementById("trial-table");
+    const trialRaw = document.getElementById("trial-raw");
+    const runButton = document.getElementById("run-trial");
+    let lastRun = null;
+    let clearArmed = false;
+
+    function mmOf(id) {
+      const raw = document.getElementById(id).value.trim();
+      if (!/^-?\d+(\.\d+)?$/.test(raw)) return null;
+      return Number(raw);
+    }
+
+    function fmt(value) {
+      if (value === null || value === undefined) return "—";
+      return Number(value).toFixed(1);
+    }
+
+    function renderTrials(body) {
+      trialTable.replaceChildren();
+      const groups = body.groups || [];
+      if (groups.length) {
+        const table = document.createElement("table");
+        table.className = "trials";
+        const head = document.createElement("tr");
+        for (const label of ["右 / 左 / 秒", "回数", "向きの平均", "95% 区間", "前の平均 mm", "読み"]) {
+          const cell = document.createElement("th");
+          cell.textContent = label;
+          head.appendChild(cell);
+        }
+        table.appendChild(head);
+        for (const row of groups) {
+          const tr = document.createElement("tr");
+          const interval = row.n < 2 ? "—" : fmt(row.ci_low) + " … " + fmt(row.ci_high);
+          const cells = [
+            row.right + " / " + row.left + " / " + (row.ms / 1000).toFixed(1),
+            String(row.n),
+            fmt(row.mean) + "°",
+            interval,
+            fmt(row.front_mean),
+            row.reading,
+          ];
+          for (const text of cells) {
+            const td = document.createElement("td");
+            td.textContent = text;
+            tr.appendChild(td);
+          }
+          table.appendChild(tr);
+        }
+        trialTable.appendChild(table);
+      }
+      const lines = (body.trials || []).map((trial) => [
+        trial.right,
+        trial.left,
+        trial.ms,
+        trial.front_mm,
+        trial.rear_mm,
+        trial.length_mm,
+        Number(trial.heading_deg).toFixed(2),
+      ].join(" "));
+      trialRaw.textContent = lines.length ? "右 左 ms 前 後ろ 間隔 向き°\n" + lines.join("\n") : "";
+    }
+
+    async function postTrial(path, params) {
+      const query = params ? "?" + params.toString() : "";
+      const res = await fetch(path + query, { method: "POST" });
+      if (!res.ok) throw new Error(String(res.status));
+      return res.json();
+    }
+
+    function sleep(ms) {
+      return new Promise((resolve) => setTimeout(resolve, ms));
+    }
+
+    async function measure() {
+      disarmClear();
+      const sec = mmOf("trial-sec");
+      if (sec === null || sec < 0.2 || sec > 3) {
+        trialNote.textContent = "秒は 0.2 から 3";
+        return;
+      }
+      const ms = Math.round(sec * 1000);
+      runButton.disabled = true;
+      trialNote.textContent = "走行中";
+      try {
+        const body = await postTrial("/run", new URLSearchParams({
+          right: String(commands.forward_right),
+          left: String(commands.forward_left),
+          ms: String(ms),
+        }));
+        renderTrials(body);
+        if (body.error || body.started === false) {
+          trialNote.textContent = body.error || "計測中";
+          return;
+        }
+        const deadline = Date.now() + ms + 2000;
+        let st = null;
+        while (Date.now() < deadline) {
+          await sleep(100);
+          const res = await fetch("/status");
+          if (!res.ok) throw new Error(String(res.status));
+          st = await res.json();
+          if (!st.busy) break;
+        }
+        if (!st || st.busy || st.aborted) {
+          lastRun = null;
+          trialNote.textContent = st && st.aborted ? "途中で止めた" : "計測の通信が切れた";
+          return;
+        }
+        lastRun = { right: body.right, left: body.left, ms: body.ms };
+        trialNote.textContent = "止まった。右 " + body.right + " 左 " + body.left + " を記録するなら、前と後ろの mm を入れて記録";
+        document.getElementById("front-mm").focus();
+      } catch (err) {
+        trialNote.textContent = "計測の通信が切れた";
+      } finally {
+        runButton.disabled = false;
+      }
+    }
+
+    async function saveTrial() {
+      if (!lastRun) {
+        trialNote.textContent = "先に測る";
+        return;
+      }
+      const front = mmOf("front-mm");
+      const rear = mmOf("rear-mm");
+      const length = mmOf("length-mm");
+      if (front === null || rear === null || length === null) {
+        trialNote.textContent = "前、後ろ、間隔を数値で入れる";
+        return;
+      }
+      try {
+        const body = await postTrial("/record", new URLSearchParams({
+          right: String(lastRun.right),
+          left: String(lastRun.left),
+          ms: String(lastRun.ms),
+          front: String(front),
+          rear: String(rear),
+          length: String(length),
+        }));
+        if (body.error) {
+          trialNote.textContent = body.error;
+          return;
+        }
+        renderTrials(body);
+        trialNote.textContent = "記録した。車体を出発線に戻して、同じ左右でもう一度測れる";
+        document.getElementById("front-mm").value = "";
+        document.getElementById("rear-mm").value = "";
+      } catch (err) {
+        trialNote.textContent = "記録の通信が切れた";
+      }
+    }
+
+    function disarmClear() {
+      clearArmed = false;
+      document.getElementById("clear-trial").textContent = "全部消す";
+    }
+
+    runButton.addEventListener("click", measure);
+    document.getElementById("save-trial").addEventListener("click", saveTrial);
+    document.getElementById("undo-trial").addEventListener("click", async () => {
+      disarmClear();
+      try {
+        renderTrials(await postTrial("/undo"));
+        trialNote.textContent = "直前の記録を消した";
+      } catch (err) {
+        trialNote.textContent = "記録の通信が切れた";
+      }
+    });
+    document.getElementById("clear-trial").addEventListener("click", async () => {
+      if (!clearArmed) {
+        clearArmed = true;
+        document.getElementById("clear-trial").textContent = "本当に消す";
+        return;
+      }
+      disarmClear();
+      try {
+        renderTrials(await postTrial("/clear"));
+        lastRun = null;
+        trialNote.textContent = "記録を全部消した";
+      } catch (err) {
+        trialNote.textContent = "記録の通信が切れた";
+      }
+    });
+
+    recall();
+    paint();
+    send();
+    fetch("/trials").then((res) => res.json()).then(renderTrials).catch(() => {});
+  </script>
+</body>
+</html>

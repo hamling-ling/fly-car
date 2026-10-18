@@ -1,0 +1,8 @@
+# App Lab のアプリ。Web UI はポート 7000。カメラは使わない。
+
+name: motor_adjust
+description: 十字キーで車輪を動かし、左右の指令を直接入れる
+icon: 🔧
+ports: []
+bricks:
+  - arduino:web_ui: {}
