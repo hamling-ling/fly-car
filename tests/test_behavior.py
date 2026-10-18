@@ -26,6 +26,8 @@ from flycar.behavior import (
     hold,
     speed_and_yaw,
 )
+from flycar.hinge import calibrated_command
+from flycar.pulse import REVERSE_START, wheel_pulses
 
 # Half-screen counts. The second number of each pair is the right half.
 FRONT_RED = (0.45, 0.45)
@@ -61,12 +63,13 @@ def assert_rolling(got: Hold) -> None:
 
 
 def assert_spinning(got: Hold, turn: float) -> None:
+    """片側の青は回りながら下がる。車輪の符号は逆のまま。"""
     assert got.mode == "spin"
-    assert got.x == pytest.approx(0.0, abs=1e-9)
-    assert got.y == pytest.approx(0.0, abs=1e-9)
+    assert got.x < -0.02
     assert turn * got.omega > 0.2
     assert turn * got.heading > 0.2
     assert got.v_left * got.v_right < 0
+    assert got.speed < -0.02
 
 
 def assert_arc(got: Hold, turn: float) -> None:
@@ -101,7 +104,7 @@ class TestStep1:
         assert_arc(show(LEFT_RED, NO_BLUE), turn=1.0)
 
     def test_one_red_cell_turns_inside_a_room(self) -> None:
-        """片側の赤だけの回転半径は 10 cm。両輪は前を向いたまま。"""
+        """片側の赤だけの回転半径は 20 cm。両輪は前を向いたまま。"""
         got = show(LEFT_RED, NO_BLUE)
         assert got.speed / abs(got.omega) == pytest.approx(RED_RADIUS, abs=0.02)
 
@@ -147,17 +150,33 @@ class TestNothing:
 
 
 class TestStep2:
-    def test_front_blue_stops_without_red(self) -> None:
-        """赤が無いとき、正面の青で止まる。"""
-        assert_stopped(show(NO_RED, FRONT_BLUE))
+    def test_front_blue_backs_up_without_red(self) -> None:
+        """赤が無いとき、正面の青は方位を保って下がる。"""
+        got = show(NO_RED, FRONT_BLUE)
+        assert got.mode == "back"
+        assert got.heading == pytest.approx(0.0, abs=1e-6)
+        assert got.y == pytest.approx(0.0, abs=1e-6)
+        assert got.x < -0.05
+        assert got.omega == pytest.approx(0.0, abs=1e-6)
+        assert got.v_left < -0.05
+        assert got.v_right < -0.05
 
     def test_right_blue_spins_left(self) -> None:
-        """赤が無いとき、右の青でその場で左へ回る。"""
+        """赤が無いとき、右の青で下がりながら左へ回る。"""
         assert_spinning(show(NO_RED, RIGHT_BLUE), turn=1.0)
 
     def test_left_blue_spins_right(self) -> None:
-        """赤が無いとき、左の青でその場で右へ回る。"""
+        """赤が無いとき、左の青で下がりながら右へ回る。"""
         assert_spinning(show(NO_RED, LEFT_BLUE), turn=-1.0)
+
+    def test_logged_bilateral_blue_clears_the_reverse_floor(self) -> None:
+        """左右に青が写ったログは、送る両輪が後退の下限を超える。"""
+        for blue in ((0.33, 0.39), (0.26, 0.60), (0.32, 0.55), (0.30, 0.20)):
+            got = show((0.0, 0.0), blue)
+            sent = calibrated_command(*wheel_pulses(got.v_left, got.v_right))
+            assert got.mode == "back"
+            assert sent[0] <= -REVERSE_START
+            assert sent[1] <= -REVERSE_START
 
 
 class TestStep3:
@@ -181,13 +200,12 @@ class TestStep3:
 
 class TestStep4:
     def test_right_blue_turns_a_right_red_away(self) -> None:
-        """大きい右の赤と右の青は発火率が頭打ちになり、赤の係数がわずかに残る。"""
+        """大きい右の赤と右の青は頭打ちになり、広い赤の弧より青のヨーが勝つ。"""
         alone = show(RIGHT_RED, NO_BLUE)
         got = show(RIGHT_RED, RIGHT_BLUE)
         assert got.mode == "cruise"
         assert alone.omega < -0.5
-        assert -0.2 < got.omega < 0.0
-        assert abs(got.omega) < abs(alone.omega) / 4
+        assert got.omega > 0.3
         assert got.speed < alone.speed
         assert got.x > 0.0
         assert got.v_left > 0.0
@@ -203,13 +221,12 @@ class TestStep4:
 
 class TestStep5:
     def test_left_blue_turns_a_left_red_away(self) -> None:
-        """大きい左の赤と左の青は発火率が頭打ちになり、赤の係数がわずかに残る。"""
+        """大きい左の赤と左の青は頭打ちになり、広い赤の弧より青のヨーが勝つ。"""
         alone = show(LEFT_RED, NO_BLUE)
         got = show(LEFT_RED, LEFT_BLUE)
         assert got.mode == "cruise"
         assert alone.omega > 0.5
-        assert 0.0 < got.omega < 0.2
-        assert abs(got.omega) < abs(alone.omega) / 4
+        assert got.omega < -0.3
         assert got.speed < alone.speed
         assert got.x > 0.0
         assert got.v_left > 0.0

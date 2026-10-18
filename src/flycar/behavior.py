@@ -9,23 +9,25 @@ when the camera is connected.
 Each count is a current into one LIF cell. DNa02 takes red, DNp01 takes
 blue. The wheels read the firing rates directly:
 
-- forward speed is the red sum minus ``BLUE_FORWARD`` times the blue sum,
-  and it does not reverse
+- forward speed is the red sum minus ``BLUE_FORWARD`` times the blue sum.
+  A negative result reverses; it is not clipped to a stop
 - yaw is ``RED_YAW`` times the red difference plus ``BLUE_YAW`` times the
   blue difference. Positive yaw is a left turn, so a right-hand red turns
   right and a right-hand blue turns left
 
 ``BLUE_FORWARD`` is less than one, so a one-sided blue turns harder than it
-brakes. ``RED_RADIUS`` is 0.10 m: a phone moved across the frame stays in
-view while the heading catches it. ``BLUE_YAW`` is raised with that tighter
-arc so a frontal red and a right-hand blue still pass on the blue's left
-with both wheels forward. At equal firing rates the red yaw coefficient is
-slightly larger than the blue one.
+brakes. ``RED_RADIUS`` is 0.20 m. At 0.10 m a diagonal red yawed out of the
+camera before the two halves could even out. ``BLUE_YAW`` stays at the
+value that passes a frontal red and a right-hand blue on the blue's left
+with both wheels forward. At equal firing rates the blue yaw coefficient is
+now the larger one.
 
 Nothing is firing, so an empty frame and a subthreshold color both stop.
-Equal blue on both sides cancels yaw and subtracts from forward, which is a
-stop when that weighted blue sum outweighs red. One side of blue with no
-red has no forward term left, so the car spins in place.
+Equal blue on both sides cancels yaw. Both cells also sit on the refractory
+ceiling once a half is a few times the count reference, so a blue paper
+across the frame has no yaw left. The negative forward term then backs the
+car straight up. One side of blue keeps a yaw, so the car backs up while it
+turns.
 
 The one hand-written exception is a safety stop. When both red halves are
 at least ``RED_FILL``, both wheels are held at rest even though DNa02 is
@@ -68,18 +70,16 @@ COUNT_FLOOR = 0.04
 
 # Front red 0.45/0.45 saturates near 196 Hz a side. That sum is about 0.24 m/s.
 # FORWARD / (RED_YAW * YAW) is the turning radius while only one red cell
-# is firing. 0.10 m is small enough that a hand-moved phone stays in frame
-# while the car yaws onto it. 0.15 m still loses that sweep, and 0.30 m
-# never centers a phone 0.40 m ahead. The radius stays above TRACK/2, so
-# both wheels stay forward and the inner one runs at 0.4 times the path
-# speed. BLUE_YAW is high enough that the blue dodge still misses the
-# sphere with both wheels forward. BLUE_FORWARD leaves forward speed when
-# the rates match.
+# is firing. 0.20 m halves the yaw rate of the 0.10 m arc, which swung a
+# diagonal red out of the camera. The radius stays above TRACK/2, so both
+# wheels stay forward and the inner one runs at 0.7 times the path speed.
+# BLUE_YAW is high enough that the blue dodge still misses the sphere with
+# both wheels forward. BLUE_FORWARD leaves forward speed when the rates match.
 FORWARD_PER_HZ = 0.0006
 YAW_PER_HZ = 0.0024
 BLUE_YAW = 2.4
 BLUE_FORWARD = 0.35
-RED_RADIUS = 0.10
+RED_RADIUS = 0.20
 RED_YAW = FORWARD_PER_HZ / (YAW_PER_HZ * RED_RADIUS)
 
 
@@ -134,13 +134,15 @@ def red_fills_the_frame(red_l: float, red_r: float) -> bool:
 def speed_and_yaw(dna_l: float, dna_r: float, gf_l: float, gf_r: float) -> tuple[float, float]:
     """Forward speed in m/s and yaw in rad/s. Positive yaw turns left.
 
-    Forward is the red sum minus a fraction of the blue sum, clipped so the
-    car does not reverse. Yaw weights the blue difference more than the red
-    difference, so a one-sided obstacle out-turns the attractant.
+    Forward is the red sum minus a fraction of the blue sum. A negative sum
+    reverses at the same coefficient, so a blue that fills both halves backs
+    away even after the two cells have saturated and the yaw has cancelled.
+    Yaw weights the blue difference more than the red difference, so a
+    one-sided obstacle out-turns the attractant.
     """
     forward = (dna_l + dna_r) - BLUE_FORWARD * (gf_l + gf_r)
     yaw = RED_YAW * (dna_l - dna_r) + BLUE_YAW * (gf_r - gf_l)
-    speed = max(0.0, forward * FORWARD_PER_HZ)
+    speed = forward * FORWARD_PER_HZ
     omega = yaw * YAW_PER_HZ
     return speed, omega
 
@@ -151,6 +153,8 @@ def motion_mode(speed: float, v_left: float, v_right: float) -> str:
         return "stop"
     if speed < 1e-6 and v_left * v_right < 0.0:
         return "spin"
+    if v_left < 0.0 and v_right < 0.0:
+        return "back"
     return "cruise"
 
 

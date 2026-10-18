@@ -21,7 +21,7 @@ from matplotlib.patches import Ellipse, Polygon
 from flycar.behavior import DT, V_THRESHOLD
 from flycar.fov import Blob, Run, View
 
-MODE_JA = {"cruise": "前進", "stop": "停止", "spin": "その場旋回"}
+MODE_JA = {"cruise": "前進", "stop": "停止", "spin": "旋回", "back": "後退"}
 IMG_W, IMG_H = 16.0, 9.0
 _COLORS = {"red": "C3", "blue": "C0"}
 _LABELS = {"red": "赤", "blue": "青"}

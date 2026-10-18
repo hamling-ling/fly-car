@@ -60,7 +60,7 @@ def test_reference_red_starts_on_the_right_and_stops_centered():
     assert centered
     stops = [sample for sample in run.samples if sample.mode == "stop"]
     assert stops
-    assert stops[0].t == pytest.approx(4.74)
+    assert stops[0].t == pytest.approx(4.78)
     assert stops[0].red.left >= 0.75
     assert stops[0].red.right >= 0.75
     assert abs(stops[0].red.nx) < 0.1
@@ -80,15 +80,15 @@ def test_empty_view_stays_put():
     assert run.samples[-1].heading == pytest.approx(0.0)
 
 
-def test_right_blue_only_spins_in_place_and_stops_with_blue_left():
+def test_right_blue_only_turns_left_and_stops_once_blue_is_left():
     run = simulate(Scene(red=None, blue=Blob((0.45, -0.08), 0.10)))
     spins = [sample for sample in run.samples if sample.mode == "spin"]
     stops = [sample for sample in run.samples if sample.mode == "stop"]
-    assert spins[0].t == pytest.approx(0.0)
+    assert spins[0].t == pytest.approx(0.20)
     assert spins[0].omega > 0.0
-    assert stops[0].t == pytest.approx(1.68)
-    assert stops[0].x == pytest.approx(0.0, abs=1e-6)
-    assert stops[0].y == pytest.approx(0.0, abs=1e-6)
+    assert stops[0].t == pytest.approx(1.74)
+    assert stops[0].x < 0.0
+    assert stops[0].x > -0.10
     assert stops[0].heading > 0.4
     assert stops[0].blue.left == 0.0
     assert stops[0].blue.right < 0.15
@@ -107,7 +107,7 @@ def test_front_red_and_right_blue_passes_left_of_the_blue_and_stops():
     assert max(s.y for s in run.samples) > 0.03
     stops = [s for s in run.samples if s.mode == "stop"]
     assert stops
-    assert stops[0].t == pytest.approx(7.58)
+    assert stops[0].t == pytest.approx(6.44)
     assert stops[0].red.left >= 0.75
     assert stops[0].red.right >= 0.75
     assert ((stops[0].x - 1.30) ** 2 + stops[0].y**2) ** 0.5 < 0.35

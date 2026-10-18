@@ -53,7 +53,7 @@ python3 -m pytest tests/test_behavior.py tests/test_fov.py
 
 ### 実機で動かす
 
-本番のアプリは `src/flycar_q/`。起動は [src/flycar_q/README.md](src/flycar_q/README.md)。カメラのフレームを 0.10 秒ごとに左右の赤と青にし、0.02 秒ごとに `Plant.steps` を呼んでパルスをマイコンへ送る。色の範囲は `src/flycar/color_thresholds.json` にあり、`occupancy.py` が読む。`research/color_capture_q/fit_thresholds.py` が色紙の4点からこのファイルを書く。床での走行と、m/s からパルスへの倍率は、まだ合わせていない。ラジコンとモーターの確認は `research/` に残してある。マイコンへ渡す左右の指令をその場で入れるアプリは [research/motor_adjust/README.md](research/motor_adjust/README.md)。直進に揃えた上限、マイコンへ送った指令、前進と後退の生値は [research/notebooks/straight_limits.ipynb](research/notebooks/straight_limits.ipynb)。
+本番のアプリは `src/flycar_q/`。起動は [src/flycar_q/README.md](src/flycar_q/README.md)。カメラのフレームを 0.10 秒ごとに左右の赤と青にし、0.02 秒ごとに `Plant.steps` を呼んでパルスをマイコンへ送る。色の範囲は `src/flycar/color_thresholds.json` にあり、`occupancy.py` が読む。`research/color_capture_q/fit_thresholds.py` が色紙の4点からこのファイルを書く。床での走行と、m/s からパルスへの倍率は、まだ合わせていない。ラジコンとモーターの確認は `research/` に残してある。マイコンへ渡す左右の指令をその場で入れるアプリは [research/motor_adjust/README.md](research/motor_adjust/README.md)。直進に揃えた上限、マイコンへ送った指令、前進と後退の生値は [research/notebooks/straight_limits.ipynb](research/notebooks/straight_limits.ipynb)。ラジコンのページでは、その折れ線を右から左への変換としてオンにできる。`src/flycar_q` は送信直前に、同じ折れ線で左の指令を置き換える。
 
 ## 内容物
 
@@ -229,10 +229,10 @@ $$
 $$
 
 $$
-v = \max(0,\ k_v\, u), \qquad \omega = k_\omega\, \psi
+v = k_v\, u, \qquad \omega = k_\omega\, \psi
 $$
 
-右の赤は $r^{\mathrm{DNa02}}_R$ を増やして右へ回る。右の青は $r^{\mathrm{DNp01}}_R$ を増やして左へ回る。青の和は $\beta_u$ 倍して前進から引く。$\beta_u$ は 1 より小さいので、同じ発火率では赤の和が残る。赤の半径を縮めた分だけ $\beta_b$ も上げてあり、正面の赤と右の青は、青の左側を両輪前進のまま通る。同じ発火率では $\beta_r$ のほうがわずかに大きい。負の $u$ は 0 にするので、後退はしない。赤の片側だけが発火しているときの回転半径は $k_v / (\beta_r k_\omega)$ である。
+右の赤は $r^{\mathrm{DNa02}}_R$ を増やして右へ回る。右の青は $r^{\mathrm{DNp01}}_R$ を増やして左へ回る。青の和は $\beta_u$ 倍して前進から引く。$\beta_u$ は 1 より小さいので、同じ発火率では赤の和が残る。正面の赤と右の青は、青の左側を両輪前進のまま通る。同じ発火率では $\beta_b$ のほうが大きい。$u$ が負のときも同じ $k_v$ を掛けるので、車は後退する。左右の青が同じ発火率ならヨーは打ち消され、まっすぐ下がる。青が片側だけのときはヨーが残り、下がりながら回る。赤の片側だけが発火しているときの回転半径は $k_v / (\beta_r k_\omega)$ である。
 
 例外が一つある。床を通したあと赤の左右がどちらも $c_{\mathrm{stop}}$ 以上なら、発火していても車輪を止める。
 
@@ -246,7 +246,7 @@ $$
 v_L = v - \omega\, d / 2, \qquad v_R = v + \omega\, d / 2
 $$
 
-図に出す「停止」「その場旋回」「前進」は、この車輪の符号へ後から付けた名前である。車輪の指令には戻らない。
+図に出す「停止」「旋回」「前進」「後退」は、この車輪の符号へ後から付けた名前である。車輪の指令には戻らない。
 
 ## 定数
 
@@ -257,11 +257,11 @@ $$
 | $\theta$ | `COUNT_FLOOR` | 半画面の占有がこれ未満なら空 | 0.04 |
 | $c_{\mathrm{ref}}$ | `RED_REF`, `BLUE_REF` | この占有で電流が 1 | 0.04 |
 | $\beta_u$ | `BLUE_FORWARD` | 青の和を前進から引く係数 | 0.35 |
-| $\beta_r$ | `RED_YAW` | 赤の左右差のヨー係数 | 2.5 |
+| $\beta_r$ | `RED_YAW` | 赤の左右差のヨー係数 | 1.25 |
 | $\beta_b$ | `BLUE_YAW` | 青の左右差のヨー係数 | 2.4 |
 | $k_v$ | `FORWARD_PER_HZ` | 発火率から前進速度 | 0.0006 m/s/Hz |
 | $k_\omega$ | `YAW_PER_HZ` | 発火率からヨー角速度 | 0.0024 rad/s/Hz |
 | $c_{\mathrm{stop}}$ | `RED_FILL` | 左右の赤がともにこれ以上なら停止 | 0.75 |
 | $d$ | `TRACK` | 軌間 | 0.12 m |
 
-赤だけが片側で発火しているときの回転半径 $k_v / (\beta_r k_\omega)$ は 0.10 m。手で動かしたスマホが画面から出る前に、向きが追いつく大きさである。軌間の半分より大きいので両輪は前を向き、内側は経路速度の 0.4 倍になる。
+赤だけが片側で発火しているときの回転半径 $k_v / (\beta_r k_\omega)$ は 0.20 m。0.10 m では斜め前の赤に対して向きが速すぎ、紙が画面の外へ出た。軌間の半分より大きいので両輪は前を向き、内側は経路速度の 0.7 倍になる。
