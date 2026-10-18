@@ -21,6 +21,7 @@ from flycar.pulse import wheel_pulses
 from camera import Eye
 from config import COUNT_S, LOG_S, MIRROR, TICK_S
 from motors import send, wait_until_bridge
+from schedule import Next
 
 
 def loop() -> None:
@@ -33,12 +34,12 @@ def loop() -> None:
         eye.start()
         if not eye.wait_ready():
             print("camera: フレームが来てから走り始める")
-        next_count = time.monotonic()
-        next_tick = next_count
-        next_log = next_count
+        next_count = Next(COUNT_S)
+        next_tick = Next(TICK_S)
+        next_log = Next(LOG_S)
         while True:
             now = time.monotonic()
-            if now >= next_count:
+            if next_count.tick(now):
                 frame = eye.latest()
                 if frame is not None:
                     try:
@@ -47,25 +48,16 @@ def loop() -> None:
                         print(f"counts: {exc}")
                         counts = (0.0, 0.0, 0.0, 0.0)
                         send(0, 0)
-                next_count += COUNT_S
-                if next_count < now:
-                    next_count = now + COUNT_S
-            if now >= next_tick:
+            if next_tick.tick(now):
                 step = plant.steps(*counts)
                 sent = send(*wheel_pulses(step.v_left, step.v_right))
-                if sent is not None and now >= next_log:
+                if sent is not None and next_log.tick(now):
                     right, left = sent
                     print(
                         f"red {counts[0]:.2f} {counts[1]:.2f}  "
                         f"blue {counts[2]:.2f} {counts[3]:.2f}  "
                         f"pulse R:{right} L:{left}  {step.mode}"
                     )
-                    next_log += LOG_S
-                    if next_log < now:
-                        next_log = now + LOG_S
-                next_tick += TICK_S
-                if next_tick < now:
-                    next_tick = now + TICK_S
             time.sleep(0.002)
     finally:
         send(0, 0)
