@@ -1,4 +1,8 @@
-"""Send wheel pulses to the sketch. Arguments are right, then left."""
+"""Send wheel pulses to the sketch. Arguments are right, then left.
+
+The law's command is logged by the caller. This module applies the table
+start threshold first, so a logged pulse of 12 can still go out as stop.
+"""
 
 from __future__ import annotations
 
@@ -6,10 +10,14 @@ import time
 
 from arduino.app_utils import Bridge
 
+from flycar.pulse import motion_pulse
+
 
 def send(right: int, left: int) -> bool:
+    right = motion_pulse(right)
+    left = motion_pulse(left)
     try:
-        Bridge.call("setMotorSpeed", int(right), int(left))
+        Bridge.call("setMotorSpeed", right, left)
     except Exception as exc:
         print(f"setMotorSpeed failed: {exc}")
         return False

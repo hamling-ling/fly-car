@@ -1,7 +1,8 @@
 """カメラ映像を見ながら、ブラウザの十字キーで左右の車輪を動かす。
 
-車輪の符号は research/motor_test と同じ。setMotorSpeed の引数は右、左で、
-正が前進、負が後退。右旋回は左の車輪を進め、右の車輪を戻す。
+setMotorSpeed の引数は右、左で、正が前進、負が後退。
+左モーターの +/- は逆つなぎなので、スケッチが左のパルスを反転してから µs にする。
+右旋回は左の車輪を進め、右の車輪を戻す。
 ブラウザからの指令が WATCHDOG_S 秒途切れたら止める。
 """
 
@@ -37,11 +38,6 @@ _EXPOSURE_CONTROLS = (
 # 1 回落ちても止まらないよう、途切れの判定はそれより長くする。
 WATCHDOG_S = 0.45
 PULSE_LIMIT = 255
-# スライダは 1.00〜2.00 を 1000〜2000 で渡す。スケッチの反時計回り側だけに掛かる。
-# 1620 は前進、速度 40 でまっすぐになった 1.62 倍。
-GAIN_MIN_MILLI = 1000
-GAIN_MAX_MILLI = 2000
-CCW_GAIN_MILLI = 1620
 
 ui = WebUI()
 lock = threading.Lock()
@@ -51,7 +47,6 @@ state = {
     "sent_right": None,
     "sent_left": None,
     "last": time.monotonic(),
-    "ccw_gain": CCW_GAIN_MILLI / 1000,
 }
 camera_error = ""
 
@@ -99,20 +94,6 @@ def set_target(right: int, left: int, reason: str = "") -> dict:
     note = f" ({reason})" if reason else ""
     print(f"motors R:{right} L:{left}{note}")
     return {"right": right, "left": left}
-
-
-def set_ccw_gain(milli: int = GAIN_MIN_MILLI) -> dict:
-    """反時計回り側のパルス幅に掛ける倍率。1000 が 1.00 倍。"""
-    milli = clamp(int(milli), GAIN_MIN_MILLI, GAIN_MAX_MILLI)
-    try:
-        Bridge.call("setCcwGain", milli)
-    except Exception as exc:
-        print(f"setCcwGain failed: {exc}")
-        return {"ccw_gain": milli / 1000, "error": str(exc)}
-    with lock:
-        state["ccw_gain"] = milli / 1000
-    print(f"ccw gain {milli / 1000:.3f}")
-    return {"ccw_gain": milli / 1000}
 
 
 def drive(up: int = 0, down: int = 0, left: int = 0, right: int = 0, speed: int = 160) -> dict:
@@ -172,7 +153,6 @@ def status() -> dict:
             "left": state["left"],
             "camera": camera_error == "",
             "camera_error": camera_error,
-            "ccw_gain": state["ccw_gain"],
         }
 
 
@@ -180,7 +160,6 @@ def loop() -> None:
     # スケッチの setup でも止める。Bridge が上がるまでここでは繰り返す。
     for _ in range(50):
         if "error" not in set_target(0, 0, "start"):
-            set_ccw_gain(CCW_GAIN_MILLI)
             break
         time.sleep(0.1)
 
@@ -229,6 +208,5 @@ except Exception as exc:
     print(f"camera: {exc}")
 
 ui.expose_api("POST", "/drive", drive)
-ui.expose_api("POST", "/gain", set_ccw_gain)
 ui.expose_api("GET", "/status", status)
 App.run(user_loop=loop)

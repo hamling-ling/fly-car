@@ -61,8 +61,17 @@
     }
     label { display: block; color: var(--muted); margin: 14px 0 6px; }
     label:first-child { margin-top: 0; }
-    input[type="range"] { width: 100%; accent-color: var(--held); }
-    .speed-value { text-align: right; font-variant-numeric: tabular-nums; }
+    input[type="number"] {
+      width: 100%;
+      padding: 8px 10px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #2c303a;
+      color: var(--text);
+      font: inherit;
+      font-size: 1.5rem;
+      font-variant-numeric: tabular-nums;
+    }
     .pad {
       display: grid;
       grid-template-columns: repeat(3, 72px);
@@ -101,11 +110,9 @@
       </div>
     </section>
     <section class="panel">
-      <label for="speed">速度 <span id="speed-value" class="speed-value">160</span></label>
-      <input id="speed" type="range" min="0" max="255" value="160">
-      <label for="ccw-gain">反時計回りの倍率 <span id="ccw-gain-value" class="speed-value">1.62</span></label>
-      <input id="ccw-gain" type="range" min="1000" max="2000" value="1620" step="10">
-      <p class="hint">前進で左へ曲がるなら上げる。右へ曲がり過ぎたら下げる。まっすぐになった数を、スケッチの CCW_GAIN に書く。</p>
+      <label for="speed">速度</label>
+      <input id="speed" type="number" min="0" max="255" step="1" value="160" inputmode="numeric" autocomplete="off">
+      <p class="hint">0 から 255 の整数を直接入れる。1 ずつ変えて、車輪が動き始める値を見る。欄の中では上下キーが速度を変える。反時計回りの倍率は掛けていません。</p>
       <div class="pad" id="pad">
         <span></span>
         <button type="button" data-dir="up" aria-label="前進">↑</button>
@@ -141,17 +148,25 @@
     const sources = new Set();
     const held = new Set();
     const speedInput = document.getElementById("speed");
-    const gainInput = document.getElementById("ccw-gain");
     const motion = document.getElementById("motion");
     const link = document.getElementById("link");
+    let speed = 160;
     let timer = null;
     let inflight = false;
     let pending = false;
-    let gainInflight = false;
-    let gainPending = false;
 
-    const savedGain = Number(sessionStorage.getItem("ccw-gain"));
-    if (savedGain >= 1000 && savedGain <= 2000) gainInput.value = String(savedGain);
+    function typing() {
+      const el = document.activeElement;
+      return el === speedInput;
+    }
+
+    function typedSpeed() {
+      const raw = speedInput.value.trim();
+      if (!/^\d+$/.test(raw)) return null;
+      const n = Number(raw);
+      if (n > 255) return null;
+      return n;
+    }
 
     function recompute() {
       held.clear();
@@ -174,9 +189,6 @@
 
     function paint() {
       motion.textContent = label();
-      document.getElementById("speed-value").textContent = speedInput.value;
-      document.getElementById("ccw-gain-value").textContent =
-        (Number(gainInput.value) / 1000).toFixed(2);
       for (const button of document.querySelectorAll("#pad button[data-dir]")) {
         button.classList.toggle("held", held.has(button.dataset.dir));
       }
@@ -193,7 +205,7 @@
         down: held.has("down") ? "1" : "0",
         left: held.has("left") ? "1" : "0",
         right: held.has("right") ? "1" : "0",
-        speed: speedInput.value,
+        speed: String(speed),
       });
       try {
         const res = await fetch("/drive?" + params.toString(), { method: "POST" });
@@ -251,12 +263,13 @@
         if (!event.repeat) stopAll();
         return;
       }
+      if (typing()) return;
       if (!MAP[event.key] || event.repeat) return;
       event.preventDefault();
       setSource(event.key, true);
     });
     window.addEventListener("keyup", (event) => {
-      if (!MAP[event.key]) return;
+      if (!MAP[event.key] || typing()) return;
       event.preventDefault();
       setSource(event.key, false);
     });
@@ -265,36 +278,23 @@
       if (document.hidden) stopAll();
     });
 
-    async function sendGain() {
-      paint();
-      sessionStorage.setItem("ccw-gain", gainInput.value);
-      if (gainInflight) {
-        gainPending = true;
-        return;
-      }
-      gainInflight = true;
-      try {
-        const res = await fetch("/gain?milli=" + gainInput.value, { method: "POST" });
-        if (!res.ok) throw new Error(String(res.status));
-        link.textContent = "操作 接続";
-        link.classList.remove("link-off");
-      } catch (err) {
-        link.textContent = "操作 切断";
-        link.classList.add("link-off");
-      } finally {
-        gainInflight = false;
-        if (gainPending) {
-          gainPending = false;
-          sendGain();
-        }
-      }
-    }
-
+    speedInput.addEventListener("focus", () => speedInput.select());
     speedInput.addEventListener("input", () => {
-      paint();
+      const n = typedSpeed();
+      if (n === null) return;
+      speed = n;
       if (held.size) send();
     });
-    gainInput.addEventListener("input", sendGain);
+    speedInput.addEventListener("change", () => {
+      const n = typedSpeed();
+      if (n === null) {
+        speedInput.value = String(speed);
+        return;
+      }
+      speed = n;
+      speedInput.value = String(n);
+      if (held.size) send();
+    });
 
     for (const button of document.querySelectorAll("#pad button[data-dir]")) {
       button.addEventListener("pointerdown", (event) => {
@@ -330,7 +330,6 @@
 
     paint();
     send();
-    sendGain();
   </script>
 </body>
 </html>
