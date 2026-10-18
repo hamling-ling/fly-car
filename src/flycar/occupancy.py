@@ -128,3 +128,25 @@ def half_counts(frame_bgr: np.ndarray, *, mirror: bool = False) -> tuple[float, 
         return counts
     red_l, red_r, blue_l, blue_r = counts
     return red_r, red_l, blue_r, blue_l
+
+
+class Counts:
+    """Last half-frame counts. An unusable frame clears them."""
+
+    def __init__(self) -> None:
+        self.values = (0.0, 0.0, 0.0, 0.0)
+
+    def update(self, frame: np.ndarray | None, *, mirror: bool = False) -> bool:
+        """Keep the previous counts when ``frame`` is None.
+
+        Return False when the frame cannot be counted. The caller stops the wheels.
+        """
+        if frame is None:
+            return True
+        try:
+            self.values = half_counts(frame, mirror=mirror)
+        except ValueError as exc:
+            print(f"counts: {exc}")
+            self.values = (0.0, 0.0, 0.0, 0.0)
+            return False
+        return True

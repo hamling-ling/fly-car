@@ -10,8 +10,7 @@ import os
 import struct
 import fcntl
 import threading
-
-from arduino.app_peripherals.camera import Camera
+import time
 
 from config import WARMUP_FRAMES
 
@@ -50,16 +49,36 @@ def enable_auto_exposure(device: str) -> None:
         print(f"camera controls set on {device}")
 
 
+class CaptureRate:
+    """Successful captures per second since the previous read."""
+
+    def __init__(self, now: float, seen: int) -> None:
+        self.at = float(now)
+        self.seen = int(seen)
+
+    def read(self, now: float, seen: int) -> float:
+        span = float(now) - self.at
+        frames = int(seen) - self.seen
+        self.at = float(now)
+        self.seen = int(seen)
+        if span <= 0.0:
+            return 0.0
+        return frames / span
+
+
 class Eye:
     """Latest BGR frame. ``capture`` runs off the membrane loop."""
 
     def __init__(self) -> None:
+        from arduino.app_peripherals.camera import Camera
+
         self._camera = Camera(resolution=STREAM_SIZE, fps=STREAM_FPS, codec="MJPG")
         self._lock = threading.Lock()
         self._frame = None
         self._seen = 0
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
+        self._rate = CaptureRate(time.monotonic(), 0)
 
     def start(self) -> None:
         self._camera.start()
@@ -87,16 +106,26 @@ class Eye:
     def wait_ready(self, timeout_s: float = 20.0) -> bool:
         deadline = timeout_s
         waited = 0.0
+        ready = False
+        seen = 0
         while waited < deadline:
             with self._lock:
                 seen = self._seen
             if seen >= WARMUP_FRAMES:
-                print(f"camera: warmup {seen} frames")
-                return True
+                ready = True
+                break
             self._stop.wait(0.05)
             waited += 0.05
+        self._rate = CaptureRate(time.monotonic(), self.seen)
+        if ready:
+            print(f"camera: warmup {seen} frames")
+            return True
         print(f"camera: warmup saw {self.seen} frames")
         return False
+
+    def fps(self) -> float:
+        """Captures per second since the previous call. Warmup is not included."""
+        return self._rate.read(time.monotonic(), self.seen)
 
     @property
     def seen(self) -> int:

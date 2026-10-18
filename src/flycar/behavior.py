@@ -36,6 +36,7 @@ firing hard. A red that fills only one half still drives.
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 
 import numpy as np
@@ -187,6 +188,8 @@ class Plant:
         self.x = 0.0
         self.y = 0.0
         self.heading = 0.0
+        self._step_s = 0.0
+        self._step_n = 0
 
     def step(self, red_l: float, red_r: float, blue_l: float, blue_r: float) -> Step:
         i_gf = gf_current(blue_l, blue_r)
@@ -213,6 +216,7 @@ class Plant:
         """
         if n < 1:
             raise ValueError("n must be at least 1")
+        began = time.monotonic()
         i_gf = gf_current(blue_l, blue_r)
         i_dna = dna_current(red_l, red_r)
         for _ in range(n):
@@ -220,7 +224,19 @@ class Plant:
             self.gf_r.step(i_gf[1])
             self.dna_l.step(i_dna[0])
             self.dna_r.step(i_dna[1])
-        return self._emit(red_l, red_r, blue_l, blue_r, DT * n)
+        step = self._emit(red_l, red_r, blue_l, blue_r, DT * n)
+        self._step_s += time.monotonic() - began
+        self._step_n += 1
+        return step
+
+    def mean_ms(self) -> float:
+        """Mean wall time of ``steps`` since the previous read, in milliseconds."""
+        if self._step_n == 0:
+            return 0.0
+        mean = self._step_s / self._step_n * 1000.0
+        self._step_s = 0.0
+        self._step_n = 0
+        return mean
 
     def _emit(
         self,

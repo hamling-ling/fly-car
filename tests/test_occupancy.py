@@ -15,6 +15,7 @@ from flycar.occupancy import (
     RED_S,
     RED_V,
     THRESHOLDS_PATH,
+    Counts,
     half_counts,
     load_cuts,
 )
@@ -70,6 +71,28 @@ def test_loader_rejects_a_missing_file(tmp_path: Path) -> None:
 
 def test_black_is_empty() -> None:
     assert half_counts(_frame()) == (0.0, 0.0, 0.0, 0.0)
+
+
+def test_counts_hold_a_frame_and_clear_a_bad_one(capsys: pytest.CaptureFixture[str]) -> None:
+    counts = Counts()
+    assert counts.update(None) is True
+    frame = _frame()
+    frame[:, :4] = (0, 0, 255)
+    assert counts.update(frame) is True
+    assert counts.values[0] == 1.0
+    assert counts.update(None) is True
+    assert counts.values[0] == 1.0
+    assert counts.update(np.zeros((4, 8), dtype=np.uint8)) is False
+    assert counts.values == (0.0, 0.0, 0.0, 0.0)
+    assert "BGR" in capsys.readouterr().out
+
+
+def test_counts_pass_mirror_through() -> None:
+    counts = Counts()
+    frame = _frame()
+    frame[:, :4] = (0, 0, 255)
+    assert counts.update(frame, mirror=True) is True
+    assert counts.values[1] == 1.0
 
 
 def test_red_on_the_left_and_blue_on_the_right() -> None:

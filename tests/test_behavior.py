@@ -264,3 +264,13 @@ class TestSteps:
     def test_rejects_an_empty_window(self) -> None:
         with pytest.raises(ValueError):
             Plant().steps(*NO_RED, *NO_BLUE, n=0)
+
+
+def test_mean_ms_averages_steps_then_resets(monkeypatch: pytest.MonkeyPatch) -> None:
+    clock = iter((0.0, 0.002, 1.0, 1.004))
+    monkeypatch.setattr("flycar.behavior.time.monotonic", lambda: next(clock))
+    plant = Plant()
+    plant.steps(0.0, 0.0, 0.0, 0.0)
+    plant.steps(0.0, 0.0, 0.0, 0.0)
+    assert plant.mean_ms() == pytest.approx(3.0)
+    assert plant.mean_ms() == 0.0

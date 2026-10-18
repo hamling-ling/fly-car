@@ -31,7 +31,7 @@ rm -rf ~/ArduinoApps/flycar_q/.cache
 arduino-app-cli app start ~/ArduinoApps/flycar_q/
 ```
 
-ログは次で見る。1 秒に 1 行、左右の赤、左右の青、右と左のパルス、モードが出る。
+ログは次で見る。1 秒に 1 行、左右の赤、左右の青、右と左のパルス、モード、その窓のカメラ取得 fps、`Plant.steps` の平均時間が出る。
 
 ```bash
 arduino-app-cli app logs ~/ArduinoApps/flycar_q/ --tail 50
