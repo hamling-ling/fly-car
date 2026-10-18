@@ -2,7 +2,8 @@
 
 setMotorSpeed の引数は右、左で、正が前進、負が後退。
 左モーターの +/- は逆つなぎなので、スケッチが左のパルスを反転してから µs にする。
-右旋回は左の車輪を進め、右の車輪を戻す。
+折れ線がオンのとき、直進と後退の左だけを右の指令から計算し直す。
+右旋回は左の車輪を進め、右の車輪を戻す。旋回に折れ線は掛けない。
 ブラウザからの指令が WATCHDOG_S 秒途切れたら止める。
 """
 
@@ -14,6 +15,8 @@ import threading
 from arduino.app_utils import App, Bridge
 from arduino.app_bricks.web_ui import WebUI
 from arduino.app_peripherals.camera import Camera
+
+from hinge import FORWARD, REVERSE, Hinge, PULSE_LIMIT, clean_hinge, commands, straight_preview
 
 # capture.py で映った Brio 100 の MJPG。640x480 は露出が上がる前だとほぼ黒だった。
 STREAM_SIZE = (1280, 720)
@@ -37,7 +40,6 @@ _EXPOSURE_CONTROLS = (
 # キーを押しているあいだページは 0.2 秒ごとに再送する。
 # 1 回落ちても止まらないよう、途切れの判定はそれより長くする。
 WATCHDOG_S = 0.45
-PULSE_LIMIT = 255
 
 ui = WebUI()
 lock = threading.Lock()
@@ -59,18 +61,19 @@ def clamp(value: int, lo: int, hi: int) -> int:
     return value
 
 
-def mix(up: bool, down: bool, left: bool, right: bool, speed: int) -> tuple[int, int]:
-    """押されているキーから、右と左の指令 -255..255 を作る。"""
-    forward = (1 if up else 0) - (1 if down else 0)
-    # 右旋回は左輪が外側。yaw が正のとき左を進め、右を戻す。
-    yaw = (1 if right else 0) - (1 if left else 0)
-    right_cmd = forward - yaw
-    left_cmd = forward + yaw
-    peak = max(abs(right_cmd), abs(left_cmd), 1)
-    scale = clamp(speed, 0, PULSE_LIMIT) / peak
+def _lines(
+    f_offset: float,
+    f_slope: float,
+    f_after: float,
+    f_knot: float,
+    b_offset: float,
+    b_slope: float,
+    b_after: float,
+    b_knot: float,
+) -> tuple[Hinge, Hinge]:
     return (
-        int(round(right_cmd * scale)),
-        int(round(left_cmd * scale)),
+        clean_hinge(f_offset, f_slope, f_after, f_knot, FORWARD),
+        clean_hinge(b_offset, b_slope, b_after, b_knot, REVERSE),
     )
 
 
@@ -96,9 +99,55 @@ def set_target(right: int, left: int, reason: str = "") -> dict:
     return {"right": right, "left": left}
 
 
-def drive(up: int = 0, down: int = 0, left: int = 0, right: int = 0, speed: int = 160) -> dict:
-    right_pulse, left_pulse = mix(bool(up), bool(down), bool(left), bool(right), speed)
+def drive(
+    up: int = 0,
+    down: int = 0,
+    left: int = 0,
+    right: int = 0,
+    speed: int = 160,
+    hinge: int = 1,
+    f_offset: float = FORWARD.offset,
+    f_slope: float = FORWARD.slope,
+    f_after: float = FORWARD.slope_after,
+    f_knot: float = FORWARD.knot,
+    b_offset: float = REVERSE.offset,
+    b_slope: float = REVERSE.slope,
+    b_after: float = REVERSE.slope_after,
+    b_knot: float = REVERSE.knot,
+) -> dict:
+    forward, back = _lines(
+        f_offset, f_slope, f_after, f_knot, b_offset, b_slope, b_after, b_knot
+    )
+    right_pulse, left_pulse = commands(
+        bool(up),
+        bool(down),
+        bool(left),
+        bool(right),
+        speed,
+        forward,
+        back,
+        bool(int(hinge)),
+    )
     return set_target(right_pulse, left_pulse)
+
+
+def preview(
+    speed: int = 160,
+    hinge: int = 1,
+    f_offset: float = FORWARD.offset,
+    f_slope: float = FORWARD.slope,
+    f_after: float = FORWARD.slope_after,
+    f_knot: float = FORWARD.knot,
+    b_offset: float = REVERSE.offset,
+    b_slope: float = REVERSE.slope,
+    b_after: float = REVERSE.slope_after,
+    b_knot: float = REVERSE.knot,
+) -> dict:
+    """車輪は動かさない。この速度の直進と後退がどの指令になるかだけ返す。"""
+    forward, back = _lines(
+        f_offset, f_slope, f_after, f_knot, b_offset, b_slope, b_after, b_knot
+    )
+    return straight_preview(speed, forward, back, bool(int(hinge)))
 
 
 def lift_shadows(frame):
@@ -208,5 +257,6 @@ except Exception as exc:
     print(f"camera: {exc}")
 
 ui.expose_api("POST", "/drive", drive)
+ui.expose_api("GET", "/preview", preview)
 ui.expose_api("GET", "/status", status)
 App.run(user_loop=loop)

@@ -32,7 +32,7 @@
       padding: 16px;
     }
     @media (min-width: 860px) {
-      main { grid-template-columns: minmax(0, 1fr) 280px; align-items: start; }
+      main { grid-template-columns: minmax(0, 1fr) 340px; align-items: start; }
     }
     h1 { font-size: 1.25rem; font-weight: 650; margin: 0 0 8px; }
     .view {
@@ -53,6 +53,15 @@
       font-variant-numeric: tabular-nums;
     }
     .readout strong { color: var(--text); font-weight: 650; }
+    .plot {
+      margin: 12px 0 0;
+      background: #101216;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 8px 8px 4px;
+    }
+    .plot svg { display: block; width: 100%; height: auto; }
+    .plot figcaption { color: var(--muted); font-size: 0.85rem; line-height: 1.45; margin: 4px 6px 6px; }
     .panel {
       background: var(--panel);
       border: 1px solid var(--line);
@@ -72,6 +81,24 @@
       font-size: 1.5rem;
       font-variant-numeric: tabular-nums;
     }
+    .check {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 16px 0 0;
+      color: var(--text);
+    }
+    .check input { width: auto; accent-color: var(--held); }
+    .group { margin: 14px 0 0; font-weight: 650; }
+    .field {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 8.5rem;
+      gap: 8px;
+      align-items: center;
+      margin-top: 8px;
+    }
+    .field span { color: var(--muted); font-size: 0.92rem; }
+    .field input[type="number"] { font-size: 1rem; padding: 6px 8px; }
     .pad {
       display: grid;
       grid-template-columns: repeat(3, 72px);
@@ -108,11 +135,31 @@
         <span id="motion">停止</span>
         <span>右 <strong id="pulse-right">0</strong>　左 <strong id="pulse-left">0</strong></span>
       </div>
+      <figure class="plot">
+        <svg id="hinge-plot" viewBox="0 0 640 230" role="img" aria-label="右の大きさから左の大きさへの折れ線"></svg>
+        <figcaption id="plot-caption">横軸は右、縦軸は左。</figcaption>
+      </figure>
     </section>
     <section class="panel">
       <label for="speed">速度</label>
       <input id="speed" type="number" min="0" max="255" step="1" value="160" inputmode="numeric" autocomplete="off">
-      <p class="hint">0 から 255 の整数を直接入れる。1 ずつ変えて、車輪が動き始める値を見る。欄の中では上下キーが速度を変える。反時計回りの倍率は掛けていません。</p>
+      <p class="hint">0 から 255 の整数。折れ線がオンのとき、この数は右の指令です。数値の欄では十字キーは車を動かしません。上下で数を変え、左右で桁を移動します。WASD は欄にいても車輪を動かします。反時計回りの倍率は掛けていません。</p>
+      <label class="check" for="use-hinge">
+        <input id="use-hinge" type="checkbox" checked>
+        折れ線で左を決める
+      </label>
+      <p id="preview" class="hint">直進の左を計算しています。</p>
+      <p class="group">前進</p>
+      <div class="field"><span>折れ目</span><input id="f-knot" type="number" min="0" max="255" step="any" inputmode="decimal" autocomplete="off"></div>
+      <div class="field"><span>そこまでの傾き</span><input id="f-slope" type="number" min="-10" max="10" step="any" inputmode="decimal" autocomplete="off"></div>
+      <div class="field"><span>そのあとの傾き</span><input id="f-after" type="number" min="-10" max="10" step="any" inputmode="decimal" autocomplete="off"></div>
+      <div class="field"><span>切片</span><input id="f-offset" type="number" min="-255" max="255" step="any" inputmode="decimal" autocomplete="off"></div>
+      <p class="group">後退</p>
+      <div class="field"><span>折れ目</span><input id="b-knot" type="number" min="0" max="255" step="any" inputmode="decimal" autocomplete="off"></div>
+      <div class="field"><span>そこまでの傾き</span><input id="b-slope" type="number" min="-10" max="10" step="any" inputmode="decimal" autocomplete="off"></div>
+      <div class="field"><span>そのあとの傾き</span><input id="b-after" type="number" min="-10" max="10" step="any" inputmode="decimal" autocomplete="off"></div>
+      <div class="field"><span>切片</span><input id="b-offset" type="number" min="-255" max="255" step="any" inputmode="decimal" autocomplete="off"></div>
+      <p class="hint">左 = 切片 + 傾き × 右。右が折れ目を超えると、あとの傾きに替わります。初期値は直進の生値の折れ線です。直進と後退だけに使い、旋回とその場の回転は速度を左右に同じ大きさで送ります。チェックを外すと左右が同じ速度です。このタブを開き直しても、最後の値が残ります。</p>
       <div class="pad" id="pad">
         <span></span>
         <button type="button" data-dir="up" aria-label="前進">↑</button>
@@ -145,19 +192,207 @@
       "down+left": "左へ曲がりながら後退",
     };
 
+    const HINGE_KEY = "remote-hinge-v1";
+    // research/remote_control/python/hinge.py の FORWARD と REVERSE。
+    const DEFAULT_HINGE = {
+      use: true,
+      fOffset: -3.1047767904,
+      fSlope: 0.9428435978,
+      fAfter: 0.2694042727,
+      fKnot: 90,
+      bOffset: 1.6622116836,
+      bSlope: 1.0234964432,
+      bAfter: 0.5368484587,
+      bKnot: 75,
+    };
+    const FIELDS = [
+      ["fOffset", "f-offset", "f_offset", -255, 255],
+      ["fSlope", "f-slope", "f_slope", -10, 10],
+      ["fAfter", "f-after", "f_after", -10, 10],
+      ["fKnot", "f-knot", "f_knot", 0, 255],
+      ["bOffset", "b-offset", "b_offset", -255, 255],
+      ["bSlope", "b-slope", "b_slope", -10, 10],
+      ["bAfter", "b-after", "b_after", -10, 10],
+      ["bKnot", "b-knot", "b_knot", 0, 255],
+    ];
+
     const sources = new Set();
     const held = new Set();
     const speedInput = document.getElementById("speed");
     const motion = document.getElementById("motion");
     const link = document.getElementById("link");
     let speed = 160;
+    let hinge = loadHinge() || Object.assign({}, DEFAULT_HINGE);
     let timer = null;
     let inflight = false;
     let pending = false;
+    let previewSeq = 0;
 
-    function typing() {
+    function loadHinge() {
+      const saved = sessionStorage.getItem(HINGE_KEY);
+      if (!saved) return null;
+      try {
+        const body = JSON.parse(saved);
+        const next = { use: !!body.use };
+        for (const [key, , , lo, hi] of FIELDS) {
+          const n = Number(body[key]);
+          if (!Number.isFinite(n) || n < lo || n > hi) return null;
+          next[key] = n;
+        }
+        return next;
+      } catch (err) {
+        return null;
+      }
+    }
+
+    function saveHinge() {
+      sessionStorage.setItem(HINGE_KEY, JSON.stringify(hinge));
+    }
+
+    function fillHinge() {
+      document.getElementById("use-hinge").checked = hinge.use;
+      for (const [key, id] of FIELDS) {
+        document.getElementById(id).value = String(hinge[key]);
+      }
+      drawPlot();
+    }
+
+    const FIELD_STEP = {
+      "f-slope": 0.01,
+      "f-after": 0.01,
+      "b-slope": 0.01,
+      "b-after": 0.01,
+      "f-offset": 0.1,
+      "b-offset": 0.1,
+      "f-knot": 1,
+      "b-knot": 1,
+    };
+
+    function lineValue(right, offset, slope, after, knot) {
+      const x = Number(right);
+      if (!Number.isFinite(x) || x <= 0) return 0;
+      const extra = Math.max(0, x - Number(knot));
+      const value = Number(offset) + Number(slope) * x + (Number(after) - Number(slope)) * extra;
+      if (!Number.isFinite(value) || value <= 0) return 0;
+      return Math.min(255, value);
+    }
+
+    // hinge.py の left_magnitude と同じ。正の 0.5 は切り上げ、0 以下は 0。
+    function leftMagnitude(right, offset, slope, after, knot) {
+      const value = lineValue(right, offset, slope, after, knot);
+      if (value <= 0) return 0;
+      return Math.max(0, Math.min(255, Math.floor(value + 0.5)));
+    }
+
+    function drawPlot() {
+      const svg = document.getElementById("hinge-plot");
+      const caption = document.getElementById("plot-caption");
+      if (!svg || !caption) return;
+      const width = 640;
+      const height = 230;
+      const left = 44;
+      const right = 16;
+      const top = 18;
+      const bottom = 32;
+      const innerW = width - left - right;
+      const innerH = height - top - bottom;
+      const px = (x) => left + (x / 255) * innerW;
+      const py = (y) => top + (1 - y / 255) * innerH;
+      const forwardRaw = lineValue(speed, hinge.fOffset, hinge.fSlope, hinge.fAfter, hinge.fKnot);
+      const backRaw = lineValue(speed, hinge.bOffset, hinge.bSlope, hinge.bAfter, hinge.bKnot);
+      const forwardY = leftMagnitude(speed, hinge.fOffset, hinge.fSlope, hinge.fAfter, hinge.fKnot);
+      const backY = leftMagnitude(speed, hinge.bOffset, hinge.bSlope, hinge.bAfter, hinge.bKnot);
+      const line = (offset, slope, after, knot) => {
+        let d = "";
+        for (let x = 0; x <= 255; x += 1) {
+          const y = lineValue(x, offset, slope, after, knot);
+          d += (x === 0 ? "M" : "L") + px(x).toFixed(1) + " " + py(y).toFixed(1) + " ";
+        }
+        return d;
+      };
+      const ticks = [0, 128, 255].map((tick) => {
+        const xText = tick === 0 ? "start" : tick === 255 ? "end" : "middle";
+        return [
+          `<line x1="${left}" y1="${py(tick)}" x2="${width - right}" y2="${py(tick)}" stroke="#3a3f4a" stroke-width="1"/>`,
+          `<line x1="${px(tick)}" y1="${top}" x2="${px(tick)}" y2="${height - bottom}" stroke="#3a3f4a" stroke-width="1"/>`,
+          tick === 0 ? "" : `<text x="${px(tick)}" y="${height - bottom + 16}" text-anchor="${xText}" fill="#a7adba" font-size="12">${tick}</text>`,
+          `<text x="${left - 8}" y="${tick === 0 ? py(tick) - 6 : py(tick) + 4}" text-anchor="end" fill="#a7adba" font-size="12">${tick}</text>`,
+        ].join("");
+      }).join("");
+      const knotMark = (knot, color, dy) => {
+        const x = Math.max(0, Math.min(255, Number(knot)));
+        if (!Number.isFinite(x)) return "";
+        return [
+          `<line x1="${px(x)}" y1="${top}" x2="${px(x)}" y2="${height - bottom}" stroke="${color}" stroke-width="1" stroke-dasharray="2 4" opacity="0.8"/>`,
+          `<text x="${px(x)}" y="${top + dy}" text-anchor="middle" fill="${color}" font-size="12">${Math.round(x)}</text>`,
+        ].join("");
+      };
+      const knotGap = Math.abs(px(hinge.fKnot) - px(hinge.bKnot));
+      const hingeOpacity = hinge.use ? "1" : "0.28";
+      const equalWidth = hinge.use ? "1.25" : "2.25";
+      const dots = hinge.use
+        ? `<circle cx="${px(speed)}" cy="${py(forwardY)}" r="5" fill="#e2a100" stroke="#16181d" stroke-width="2"/>
+           <circle cx="${px(speed)}" cy="${py(backY)}" r="5" fill="#7eb6ff" stroke="#16181d" stroke-width="2"/>`
+        : `<circle cx="${px(speed)}" cy="${py(speed)}" r="5" fill="#f2f3f5" stroke="#16181d" stroke-width="2"/>`;
+      svg.innerHTML = [
+        ticks,
+        `<path d="M ${px(0)} ${py(0)} L ${px(255)} ${py(255)}" fill="none" stroke="#a7adba" stroke-width="${equalWidth}" stroke-dasharray="6 5"/>`,
+        knotMark(hinge.fKnot, "#e2a100", 14),
+        knotMark(hinge.bKnot, "#7eb6ff", knotGap < 36 ? 28 : 14),
+        `<path d="${line(hinge.fOffset, hinge.fSlope, hinge.fAfter, hinge.fKnot)}" fill="none" stroke="#e2a100" stroke-width="2.5" stroke-linejoin="round" opacity="${hingeOpacity}"/>`,
+        `<path d="${line(hinge.bOffset, hinge.bSlope, hinge.bAfter, hinge.bKnot)}" fill="none" stroke="#7eb6ff" stroke-width="2.5" stroke-linejoin="round" opacity="${hingeOpacity}"/>`,
+        `<line x1="${px(speed)}" y1="${top}" x2="${px(speed)}" y2="${height - bottom}" stroke="#f2f3f5" stroke-width="1" opacity="0.35"/>`,
+        dots,
+      ].join("");
+      svg.setAttribute(
+        "aria-label",
+        hinge.use
+          ? `右 ${speed} のとき、前進の左は ${forwardY}、後退の左は ${backY}`
+          : `折れ線はオフ。右 ${speed} のとき左右とも ${speed}`
+      );
+      caption.textContent = hinge.use
+        ? `横軸は右、縦軸は左。金が前進、青が後退。破線は左 = 右。点は速度 ${speed}。前進の左は ${forwardRaw.toFixed(1)}（送る値 ${forwardY}）、後退の左は ${backRaw.toFixed(1)}（送る値 ${backY}）。`
+        : `折れ線はオフ。送るのは破線で、速度 ${speed} なら左右とも ${speed}。金と青はオンにしたときの線。`;
+    }
+
+    function hingeParams() {
+      const params = { hinge: hinge.use ? "1" : "0" };
+      for (const [key, , query] of FIELDS) params[query] = String(hinge[key]);
+      return params;
+    }
+
+    function parseField(raw, lo, hi) {
+      if (!/^-?\d+(\.\d+)?$/.test(raw)) return null;
+      const n = Number(raw);
+      if (!Number.isFinite(n) || n < lo || n > hi) return null;
+      return n;
+    }
+
+    function numberField() {
       const el = document.activeElement;
-      return el === speedInput;
+      if (!el || el.tagName !== "INPUT" || el.type !== "number") return null;
+      return el;
+    }
+
+    function arrowKey(event) {
+      return event.key === "ArrowUp" || event.key === "ArrowDown"
+        || event.key === "ArrowLeft" || event.key === "ArrowRight";
+    }
+
+    function nudgeField(input, delta) {
+      const spec = FIELDS.find((row) => row[1] === input.id);
+      if (!spec) return;
+      const [key, , , lo, hi] = spec;
+      const typed = parseField(input.value.trim(), lo, hi);
+      const base = typed === null ? hinge[key] : typed;
+      let next = Math.round((base + delta) * 1e10) / 1e10;
+      if (next < lo) next = lo;
+      if (next > hi) next = hi;
+      hinge[key] = next;
+      input.value = String(next);
+      saveHinge();
+      refreshPreview();
+      if (held.size) send();
     }
 
     function typedSpeed() {
@@ -200,13 +435,13 @@
         return;
       }
       inflight = true;
-      const params = new URLSearchParams({
+      const params = new URLSearchParams(Object.assign({
         up: held.has("up") ? "1" : "0",
         down: held.has("down") ? "1" : "0",
         left: held.has("left") ? "1" : "0",
         right: held.has("right") ? "1" : "0",
         speed: String(speed),
-      });
+      }, hingeParams()));
       try {
         const res = await fetch("/drive?" + params.toString(), { method: "POST" });
         if (!res.ok) throw new Error(String(res.status));
@@ -224,6 +459,32 @@
           pending = false;
           send();
         }
+      }
+    }
+
+    function paintPreview(body) {
+      const el = document.getElementById("preview");
+      if (!hinge.use) {
+        el.textContent = "折れ線はオフ。直進は左右 " + body.forward_right + "、後退は左右 " + body.back_left + "。";
+        return;
+      }
+      el.textContent = "直進は右 " + body.forward_right + "、左 " + body.forward_left
+        + "。後退は右 " + body.back_right + "、左 " + body.back_left + "。";
+    }
+
+    async function refreshPreview() {
+      drawPlot();
+      const seq = ++previewSeq;
+      const params = new URLSearchParams(Object.assign({ speed: String(speed) }, hingeParams()));
+      try {
+        const res = await fetch("/preview?" + params.toString());
+        if (!res.ok) throw new Error(String(res.status));
+        const body = await res.json();
+        if (seq !== previewSeq) return;
+        paintPreview(body);
+      } catch (err) {
+        if (seq !== previewSeq) return;
+        document.getElementById("preview").textContent = "変換の確認に失敗しました。";
       }
     }
 
@@ -263,13 +524,22 @@
         if (!event.repeat) stopAll();
         return;
       }
-      if (typing()) return;
+      const field = numberField();
+      if (field && arrowKey(event)) {
+        const step = FIELD_STEP[field.id];
+        if (step && (event.key === "ArrowUp" || event.key === "ArrowDown")) {
+          event.preventDefault();
+          nudgeField(field, event.key === "ArrowUp" ? step : -step);
+        }
+        return;
+      }
       if (!MAP[event.key] || event.repeat) return;
       event.preventDefault();
       setSource(event.key, true);
     });
     window.addEventListener("keyup", (event) => {
-      if (!MAP[event.key] || typing()) return;
+      if (!MAP[event.key]) return;
+      if (numberField() && arrowKey(event) && !sources.has(event.key)) return;
       event.preventDefault();
       setSource(event.key, false);
     });
@@ -283,6 +553,7 @@
       const n = typedSpeed();
       if (n === null) return;
       speed = n;
+      refreshPreview();
       if (held.size) send();
     });
     speedInput.addEventListener("change", () => {
@@ -293,8 +564,40 @@
       }
       speed = n;
       speedInput.value = String(n);
+      refreshPreview();
       if (held.size) send();
     });
+
+    fillHinge();
+    document.getElementById("use-hinge").addEventListener("change", () => {
+      hinge.use = document.getElementById("use-hinge").checked;
+      saveHinge();
+      refreshPreview();
+      if (held.size) send();
+    });
+    for (const [key, id, , lo, hi] of FIELDS) {
+      const input = document.getElementById(id);
+      input.addEventListener("input", () => {
+        const n = parseField(input.value.trim(), lo, hi);
+        if (n === null) return;
+        hinge[key] = n;
+        saveHinge();
+        refreshPreview();
+        if (held.size) send();
+      });
+      input.addEventListener("change", () => {
+        const n = parseField(input.value.trim(), lo, hi);
+        if (n === null) {
+          input.value = String(hinge[key]);
+          return;
+        }
+        hinge[key] = n;
+        input.value = String(n);
+        saveHinge();
+        refreshPreview();
+        if (held.size) send();
+      });
+    }
 
     for (const button of document.querySelectorAll("#pad button[data-dir]")) {
       button.addEventListener("pointerdown", (event) => {
@@ -330,6 +633,7 @@
 
     paint();
     send();
+    refreshPreview();
   </script>
 </body>
 </html>

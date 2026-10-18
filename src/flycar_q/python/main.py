@@ -52,9 +52,9 @@ def loop() -> None:
                     next_count = now + COUNT_S
             if now >= next_tick:
                 step = plant.steps(*counts)
-                right, left = wheel_pulses(step.v_left, step.v_right)
-                send(right, left)
-                if now >= next_log:
+                sent = send(*wheel_pulses(step.v_left, step.v_right))
+                if sent is not None and now >= next_log:
+                    right, left = sent
                     print(
                         f"red {counts[0]:.2f} {counts[1]:.2f}  "
                         f"blue {counts[2]:.2f} {counts[3]:.2f}  "
