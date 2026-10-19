@@ -4,6 +4,8 @@
 #include <Arduino_RouterBridge.h>
 #include <Servo.h>
 
+#include "face.h"
+
 static const int RIGHT_MOTOR_PIN = 3;
 static const int LEFT_MOTOR_PIN = 5;
 static const unsigned long WATCHDOG_MS = 450;
@@ -56,6 +58,7 @@ void motorsSetup() {
 }
 
 void motorsLoop() {
+    faceLoop();
     if (!moving) {
         return;
     }
