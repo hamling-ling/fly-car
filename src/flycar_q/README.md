@@ -2,6 +2,70 @@
 
 Uno Q に載せる本番のアプリ。最新のフレームから左右の赤と青の占有を作り、`Plant.steps` で 20 ms 分の膜を進めて、左右のタイヤを回す。
 
+## データフロー
+
+このアプリは、最新の 1 枚から左右の赤と青の占有を作り、赤を同側の DNa02 の電流、青を同側の DNp01 の電流にするものである。0.02 秒ごとにその電流で 4 本の膜を 1 ms ずつ 20 回進め、発火率から前進とヨー、左右のパルスを作ってスケッチへ送る。DNa02 同士の化学シナプスは 0 本で、DNa02 と DNp01 のあいだも 0 本なので、4 本の膜のあいだに矢印は無い。
+
+LC4 と LPLC2 は通さない。片側の細胞全部に、その半画面の占有から作った同じ発火率 $r$ を与え、同側の DNp01 への化学シナプス数で足すと、電流は次になる。
+
+$$
+I = \frac{\sum w}{W_{\mathrm{side}}} \cdot \frac{r}{R_{\mathrm{ref}}}
+$$
+
+側の細胞を全部入れると、第一因子は 1 になる。本数も、1 本ごとの重みも消えて、$I = r / R_{\mathrm{ref}}$ だけが残る。左右はそれぞれのシナプス合計 $W_{\mathrm{side}}$ で割る。右の合計は左より少ないが、側ごとに割るのでその差は電流に残らない。$r = R_{\mathrm{ref}} \times \tilde{c} / 0.04$ と置くと、この $I$ は `gf_current` の $\tilde{c} / 0.04$ と一致する。0.04 は `BLUE_REF` で、半画面の占有がこの値のとき電流が 1 になる。左右の占有が違っても、側ごとに同じ式になる。だから、細胞を通さなくても DNp01 の電流は同じである。
+
+LC4 と LPLC2 にも膜を持たせてから DNp01 へ入れる経路は、この積和ではない。前段の発火率が頭打ちになり、同じ電流にはならない。結合表を細胞ごとに積分するのは `research/notebooks/gf_loom_sim.ipynb` で、このアプリの外にある。
+
+```mermaid
+flowchart TB
+  subgraph grab [カメラ]
+    eye["Brio 100。別スレッドが最新の 1 枚を置く"]
+  end
+  subgraph pre [0.10 秒ごと]
+    halves["half_counts。画面を左右に割る"]
+    redL["赤・左"]
+    redR["赤・右"]
+    blueL["青・左"]
+    blueR["青・右"]
+  end
+  subgraph cells [0.02 秒ごと。同じ電流で膜を 1 ms ずつ 20 回]
+    dnaL["DNa02 左"]
+    dnaR["DNa02 右"]
+    dnpL["DNp01 左"]
+    dnpR["DNp01 右"]
+  end
+  subgraph drive [車輪]
+    law["4 本の発火率から前進とヨー"]
+    guard["赤が左右とも 0.75 以上なら速度 0"]
+    pulse["wheel_pulses。右、左のパルス"]
+    mcu["スケッチ。右が D3、左が D5"]
+  end
+  face["8×13 と RGB。占有と、送ったパルス"]
+  eye --> halves
+  halves --> redL
+  halves --> redR
+  halves --> blueL
+  halves --> blueR
+  redL --> dnaL
+  redR --> dnaR
+  blueL --> dnpL
+  blueR --> dnpR
+  dnaL --> law
+  dnaR --> law
+  dnpL --> law
+  dnpR --> law
+  law --> guard
+  guard --> pulse
+  pulse --> mcu
+  redL --> face
+  redR --> face
+  blueL --> face
+  blueR --> face
+  pulse --> face
+```
+
+絵が無い周回は `setMotorSpeed(0, 0)` を送り、膜は前の占有のまま進む。顔は占有を取り直した周回だけ出す。
+
 ## 動かし方
 
 ボード上の置き場所は `~/ArduinoApps/flycar_q`。アプリだけだと `flycar` を import できない。パッケージも同じ `python/` に置く。リポジトリ直下で次を実行する。
