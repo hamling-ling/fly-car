@@ -5,6 +5,9 @@ A real frame is counted the other way: the fraction of pixels in that half
 whose color falls in the red or blue range. Position inside the half does
 not matter.
 
+The blue fill is for the face and the log. It is not the DNp01 current.
+``Counts.loom`` is that current, from ``flycar.loom``.
+
 The gates are read once from ``color_thresholds.json`` beside this file.
 ``research/color_capture_q/fit_thresholds.py`` writes that file. Restart the
 app after replacing it. Hue in the file is degrees. OpenCV stores half of that.
@@ -22,6 +25,8 @@ from pathlib import Path
 
 import cv2
 import numpy as np
+
+from flycar.loom import LoomTrack, measure_blue
 
 THRESHOLDS_PATH = Path(__file__).with_name("color_thresholds.json")
 
@@ -113,40 +118,72 @@ def _fill(mask: np.ndarray, x0: int, x1: int) -> float:
 def half_counts(frame_bgr: np.ndarray, *, mirror: bool = False) -> tuple[float, float, float, float]:
     """Return ``(red_l, red_r, blue_l, blue_r)`` in 0..1.
 
-    Column 0 is the left of the image. ``mirror`` swaps the halves after
-    counting, for a camera whose picture is flipped left to right.
+    Column 0 is the left of the image. ``mirror`` flips the picture left to
+    right before the split, for a camera whose left is the car's right.
     """
     red, blue = color_masks(frame_bgr)
+    return _halves(red, blue, mirror=mirror)
+
+
+def _halves(
+    red: np.ndarray, blue: np.ndarray, *, mirror: bool
+) -> tuple[float, float, float, float]:
+    if mirror:
+        red = np.ascontiguousarray(np.fliplr(red))
+        blue = np.ascontiguousarray(np.fliplr(blue))
     mid = red.shape[1] // 2
-    counts = (
+    return (
         _fill(red, 0, mid),
         _fill(red, mid, red.shape[1]),
         _fill(blue, 0, mid),
-        _fill(blue, mid, red.shape[1]),
+        _fill(blue, mid, blue.shape[1]),
     )
-    if not mirror:
-        return counts
-    red_l, red_r, blue_l, blue_r = counts
-    return red_r, red_l, blue_r, blue_l
 
 
 class Counts:
-    """Last half-frame counts. An unusable frame clears them."""
+    """Last half-frame fills, and the loom current of the blue region."""
 
     def __init__(self) -> None:
         self.values = (0.0, 0.0, 0.0, 0.0)
+        self.loom = (0.0, 0.0)
+        self.theta = 0.0
+        self.theta_dot = 0.0
+        self._track = LoomTrack()
 
-    def update(self, frame: np.ndarray | None, *, mirror: bool = False) -> bool:
-        """Keep the previous counts when ``frame`` is None.
+    def update(
+        self,
+        frame: np.ndarray | None,
+        *,
+        mirror: bool = False,
+        now: float | None = None,
+    ) -> bool:
+        """Keep the previous reading when ``frame`` is None.
 
         Return False when the frame cannot be counted. The caller stops the wheels.
+        ``now`` is the sample time in seconds. Expansion is zero until two
+        frames both contain a blue region.
         """
         if frame is None:
             return True
         try:
-            self.values = half_counts(frame, mirror=mirror)
+            red, blue = color_masks(frame)
         except ValueError as exc:
             print(f"counts: {exc}")
             self.values = (0.0, 0.0, 0.0, 0.0)
+            self._clear_loom()
             return False
+        if mirror:
+            red = np.ascontiguousarray(np.fliplr(red))
+            blue = np.ascontiguousarray(np.fliplr(blue))
+        self.values = _halves(red, blue, mirror=False)
+        when = 0.0 if now is None else float(now)
+        self.loom = self._track.update(measure_blue(blue), when)
+        self.theta = self._track.theta
+        self.theta_dot = self._track.theta_dot
         return True
+
+    def _clear_loom(self) -> None:
+        self._track = LoomTrack()
+        self.loom = (0.0, 0.0)
+        self.theta = 0.0
+        self.theta_dot = 0.0

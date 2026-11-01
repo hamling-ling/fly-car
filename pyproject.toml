@@ -14,7 +14,7 @@ where = ["src"]
 include = ["flycar"]
 
 [tool.setuptools.package-data]
-flycar = ["color_thresholds.json"]
+flycar = ["color_thresholds.json", "loom_cells.npz"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

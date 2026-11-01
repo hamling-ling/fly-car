@@ -1,33 +1,32 @@
-"""Half-screen red and blue counts to two wheel speeds.
+"""Red occupancy and a loom current to two wheel speeds.
 
-Counts run from 0 to 1 and are the filled fraction of each half of the
+Red counts run from 0 to 1 and are the filled fraction of each half of the
 frame. Left and right are the two halves. Position inside one half does not
-matter. Coverage that falls outside the frame simply lowers that half's
-count. Counts below ``COUNT_FLOOR`` are read as empty. That floor is tuned
-when the camera is connected.
+matter. Counts below ``COUNT_FLOOR`` are read as empty.
 
-Each count is a current into one LIF cell. DNa02 takes red, DNp01 takes
-blue. The wheels read the firing rates directly:
+DNa02 takes that red count. DNp01 does not. Its current is computed by
+``flycar.loom`` from the blue region's angular size and expansion, then
+passed in as ``loom``. A blue fill with no loom current does not fire.
+The wheels read the firing rates directly:
 
 - forward speed is the red sum minus ``BLUE_FORWARD`` times the blue sum.
   A negative result reverses; it is not clipped to a stop
 - yaw is ``RED_YAW`` times the red difference plus ``BLUE_YAW`` times the
   blue difference. Positive yaw is a left turn, so a right-hand red turns
-  right and a right-hand blue turns left
+  right and a right-hand DNp01 turns left
 
-``BLUE_FORWARD`` is less than one, so a one-sided blue turns harder than it
+``BLUE_FORWARD`` is less than one, so a one-sided DNp01 turns harder than it
 brakes. ``RED_RADIUS`` is 0.20 m. At 0.10 m a diagonal red yawed out of the
-camera before the two halves could even out. ``BLUE_YAW`` stays at the
-value that passes a frontal red and a right-hand blue on the blue's left
-with both wheels forward. At equal firing rates the blue yaw coefficient is
-now the larger one.
+camera before the two halves could even out. ``BLUE_YAW`` is 18 and the rate filter is 50 ms, both hand-set. One new
+camera frame holds a current for about 0.1 s and then expansion drops to 0.
+At 3.6 that frame turned about 6°. 18 turns the same spikes about 30°.
+The total angle scales with this coefficient. It is not a fit.
 
-Nothing is firing, so an empty frame and a subthreshold color both stop.
-Equal blue on both sides cancels yaw. Both cells also sit on the refractory
-ceiling once a half is a few times the count reference, so a blue paper
-across the frame has no yaw left. The negative forward term then backs the
-car straight up. One side of blue keeps a yaw, so the car backs up while it
-turns.
+Nothing is firing, so an empty frame and a subthreshold red both stop.
+Equal DNp01 rates cancel yaw. Both cells sit on the refractory ceiling once
+their current is well above 1, so matched looming on both sides has no yaw
+left and the negative forward term backs the car straight up. One side
+keeps a yaw, so the car backs up while it turns.
 
 The one hand-written exception is a safety stop. When both red halves are
 at least ``RED_FILL``, both wheels are held at rest even though DNa02 is
@@ -42,24 +41,24 @@ from dataclasses import dataclass
 import numpy as np
 
 # Membrane time constants match research/notebooks/chemotaxis_sim.ipynb.
-# The count references do not. That notebook still divides red counts by
-# 0.25, and it turns a loom rate into current with R_MAX / R_REF. Half-frame
-# fill is not a loom rate, so both colors use a count reference here.
-# A half-count equal to this is current 1. Exactly 1 never spikes. The
-# reference matches COUNT_FLOOR, so a color the camera still counts can fire.
-# 0.04 is a few percent of one half: a small saturated patch drives. The old
-# 0.15 waited until the phone was close, and 0.25 left the front-scene red
-# (about 0.19 a side) silent. The old blue scale (80/50) left a blue that
-# filled about 0.6 of one half below threshold.
+# RED_REF does not. That notebook still divides red counts by 0.25.
+# A half-count equal to this is DNa02 current 1. Exactly 1 never spikes.
+# The reference matches COUNT_FLOOR, so a red the camera still counts can
+# fire. 0.04 is a few percent of one half: a small saturated patch drives.
+# The old 0.15 waited until the phone was close, and 0.25 left the
+# front-scene red (about 0.19 a side) silent. Blue is not a count. loom.py
+# turns angular size and expansion into the DNp01 current.
 RED_REF = 0.04
-BLUE_REF = 0.04
 TAU_MS = 5.0
 V_THRESHOLD = 1.0
 REFRAC_MS = 5.0
 DT = 0.001
 # One camera command. fov.simulate still calls step() this many times.
 HOLD_STEPS = 20
-TAU_RATE_S = 0.100
+# 50 ms, not the notebook's 100 ms. Expansion is sampled every 0.1 s and
+# often falls to 0 on the repeated camera frame. The shorter filter lets
+# that sample reach the wheel floor. Hand-set, not a fit.
+TAU_RATE_S = 0.050
 TRACK = 0.12
 
 # Counts. Independent of the synapse ratios above.
@@ -74,11 +73,12 @@ COUNT_FLOOR = 0.04
 # is firing. 0.20 m halves the yaw rate of the 0.10 m arc, which swung a
 # diagonal red out of the camera. The radius stays above TRACK/2, so both
 # wheels stay forward and the inner one runs at 0.7 times the path speed.
-# BLUE_YAW is high enough that the blue dodge still misses the sphere with
-# both wheels forward. BLUE_FORWARD leaves forward speed when the rates match.
+# BLUE_YAW is 18 so one 0.1 s frame near current 1.8 turns about 30°.
+# 3.6 turned that frame about 6°. Hand-set, not a fit.
+# BLUE_FORWARD leaves forward speed when the rates match.
 FORWARD_PER_HZ = 0.0006
 YAW_PER_HZ = 0.0024
-BLUE_YAW = 2.4
+BLUE_YAW = 18.0
 BLUE_FORWARD = 0.35
 RED_RADIUS = 0.20
 RED_YAW = FORWARD_PER_HZ / (YAW_PER_HZ * RED_RADIUS)
@@ -121,24 +121,23 @@ def dna_current(red_l: float, red_r: float) -> tuple[float, float]:
     return (present_count(red_l) / RED_REF, present_count(red_r) / RED_REF)
 
 
-def gf_current(blue_l: float, blue_r: float) -> tuple[float, float]:
-    # Same occupancy-to-current map as DNa02. Side totals cancel, so the
-    # feather weights are not needed for the left/right current.
-    return (present_count(blue_l) / BLUE_REF, present_count(blue_r) / BLUE_REF)
-
-
 def red_fills_the_frame(red_l: float, red_r: float) -> bool:
     """Safety stop. Both halves covered, whatever the cells are doing."""
     return min(present_count(red_l), present_count(red_r)) >= RED_FILL
 
 
+def _loom_current(loom: tuple[float, float]) -> tuple[float, float]:
+    """DNp01 current passed in from ``flycar.loom``. Negative values are dropped."""
+    return (max(float(loom[0]), 0.0), max(float(loom[1]), 0.0))
+
+
 def speed_and_yaw(dna_l: float, dna_r: float, gf_l: float, gf_r: float) -> tuple[float, float]:
     """Forward speed in m/s and yaw in rad/s. Positive yaw turns left.
 
-    Forward is the red sum minus a fraction of the blue sum. A negative sum
-    reverses at the same coefficient, so a blue that fills both halves backs
+    Forward is the red sum minus a fraction of the DNp01 sum. A negative sum
+    reverses at the same coefficient, so matched looming on both sides backs
     away even after the two cells have saturated and the yaw has cancelled.
-    Yaw weights the blue difference more than the red difference, so a
+    Yaw weights the DNp01 difference more than the red difference, so a
     one-sided obstacle out-turns the attractant.
     """
     forward = (dna_l + dna_r) - BLUE_FORWARD * (gf_l + gf_r)
@@ -191,8 +190,15 @@ class Plant:
         self._step_s = 0.0
         self._step_n = 0
 
-    def step(self, red_l: float, red_r: float, blue_l: float, blue_r: float) -> Step:
-        i_gf = gf_current(blue_l, blue_r)
+    def step(
+        self,
+        red_l: float,
+        red_r: float,
+        blue_l: float,
+        blue_r: float,
+        loom: tuple[float, float] = (0.0, 0.0),
+    ) -> Step:
+        i_gf = _loom_current(loom)
         i_dna = dna_current(red_l, red_r)
         self.gf_l.step(i_gf[0])
         self.gf_r.step(i_gf[1])
@@ -207,17 +213,19 @@ class Plant:
         blue_l: float,
         blue_r: float,
         n: int = HOLD_STEPS,
+        loom: tuple[float, float] = (0.0, 0.0),
     ) -> Step:
         """Hold one frame for ``n`` milliseconds of membrane time.
 
-        The occupancy is turned into current once. Only the membranes advance
-        on each 1 ms tick. Forward speed, yaw, and the wheel speeds are read
-        once from the rates at the end of the window.
+        Red occupancy and the loom current are read once. Only the membranes
+        advance on each 1 ms tick. Forward speed, yaw, and the wheel speeds
+        are read once from the rates at the end of the window. ``blue_l`` and
+        ``blue_r`` do not drive DNp01.
         """
         if n < 1:
             raise ValueError("n must be at least 1")
         began = time.monotonic()
-        i_gf = gf_current(blue_l, blue_r)
+        i_gf = _loom_current(loom)
         i_dna = dna_current(red_l, red_r)
         for _ in range(n):
             self.gf_l.step(i_gf[0])
@@ -294,6 +302,7 @@ def hold(
     blue_r: float,
     seconds: float = 1.5,
     settle: float = 0.5,
+    loom: tuple[float, float] = (0.0, 0.0),
 ) -> Hold:
     """Show one frame for ``seconds``. Wheel speeds are the mean after ``settle``."""
     plant = Plant()
@@ -302,7 +311,7 @@ def hold(
     settled: list[Step] = []
     last: Step | None = None
     for i in range(n):
-        last = plant.step(red_l, red_r, blue_l, blue_r)
+        last = plant.step(red_l, red_r, blue_l, blue_r, loom=loom)
         if i >= n_settle:
             settled.append(last)
     if last is None or not settled:

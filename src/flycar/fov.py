@@ -20,7 +20,8 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from flycar.behavior import DT, Plant, dna_current, gf_current
+from flycar.behavior import DT, Plant, dna_current
+from flycar.loom import LoomTrack, camera_tangents, project_rel
 
 
 @dataclass(frozen=True)
@@ -108,9 +109,7 @@ class Scene:
         The diagonal is split so the squared tangents of the half-angles add
         up across the 16:9 frame.
         """
-        half = np.tan(np.deg2rad(self.dfov_deg) / 2.0)
-        vertical = half / np.sqrt(self.aspect**2 + 1.0)
-        horizontal = self.aspect * vertical
+        horizontal, vertical = camera_tangents(self.dfov_deg, self.aspect)
         return float(2 * np.arctan(horizontal)), float(2 * np.arctan(vertical))
 
     def __str__(self) -> str:
@@ -253,10 +252,11 @@ def project_blob(scene: Scene, x: float, y: float, heading: float, blob: Blob | 
 def simulate(scene: Scene) -> Run:
     """Drive ``scene`` and return one sample per hold window.
 
-    The picture is taken at the start of the window. Those counts are then
-    held for ``hold_steps`` membrane steps of 1 ms. The recorded pose is the
-    pose at the picture, and the recorded rates are the rates at the end of
-    the window.
+    The picture is taken at the start of the window. Red counts and the blue
+    sphere's loom current are held for ``hold_steps`` membrane steps of 1 ms.
+    Expansion is the increase in angular size since the previous picture.
+    The recorded pose is the pose at the picture, and the recorded rates are
+    the rates at the end of the window.
     """
     n = int(round(scene.run_s / DT))
     if n < scene.hold_steps:
@@ -265,14 +265,18 @@ def simulate(scene: Scene) -> Run:
     plant.x = scene.x
     plant.y = scene.y
     plant.heading = float((scene.heading + np.pi) % (2 * np.pi) - np.pi)
+    tan_h, tan_v = camera_tangents(scene.dfov_deg, scene.aspect)
+    track = LoomTrack()
     samples: list[Sample] = []
     for i in range(0, n, scene.hold_steps):
         red = project_blob(scene, plant.x, plant.y, plant.heading, scene.red)
         blue = project_blob(scene, plant.x, plant.y, plant.heading, scene.blue)
+        disk = _blue_disk(scene, plant.x, plant.y, plant.heading, tan_h, tan_v)
+        track.update(disk, i * DT)
         photo = (plant.x, plant.y, plant.heading)
-        step = plant.step(red.left, red.right, blue.left, blue.right)
+        step = plant.step(red.left, red.right, blue.left, blue.right, loom=track.current)
         for _ in range(scene.hold_steps - 1):
-            step = plant.step(red.left, red.right, blue.left, blue.right)
+            step = plant.step(red.left, red.right, blue.left, blue.right, loom=track.current)
         samples.append(
             Sample(
                 t=i * DT,
@@ -282,7 +286,7 @@ def simulate(scene: Scene) -> Run:
                 red=red,
                 blue=blue,
                 i_dna=dna_current(red.left, red.right),
-                i_gf=gf_current(blue.left, blue.right),
+                i_gf=track.current,
                 rate_dna=(plant.dna_l.rate, plant.dna_r.rate),
                 rate_gf=(plant.gf_l.rate, plant.gf_r.rate),
                 mode=step.mode,
@@ -292,3 +296,14 @@ def simulate(scene: Scene) -> Run:
             )
         )
     return Run(scene, tuple(samples))
+
+
+def _blue_disk(scene: Scene, x: float, y: float, heading: float, tan_h: float, tan_v: float):
+    """Angular size of the blue sphere. None when it is missing or behind the camera."""
+    blob = scene.blue
+    if blob is None:
+        return None
+    pitch = float(np.deg2rad(scene.pitch_deg))
+    optical, cam_up, cam_right = _camera_basis(heading, pitch)
+    rel = blob.center() - np.array([x, y, scene.cam_h])
+    return project_rel(rel, blob.radius, optical, cam_up, cam_right, tan_h, tan_v)

@@ -1,4 +1,4 @@
-"""20 ms ごとに膜を進め、10 Hz で占有を取り直す。
+"""20 ms ごとに膜を進め、10 Hz で占有と青の loom を取り直す。
 
 パルスの引数はスケッチと同じく右、左。カメラの読み出しは別スレッドで、
 ここは最新の 1 枚だけを見る。
@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import math
 import time
 
 import bootstrap
@@ -78,13 +79,13 @@ def loop() -> None:
             counted = False
             if next_count.tick(now):
                 counted = True
-                if not counts.update(eye.latest(), mirror=MIRROR):
+                if not counts.update(eye.latest(), mirror=MIRROR, now=now):
                     stopped = send(0, 0)
                     if stopped is not None:
                         last_sent = stopped
                         last_mode = "stop"
             if next_tick.tick(now):
-                step = plant.steps(*counts.values)
+                step = plant.steps(*counts.values, loom=counts.loom)
                 sent = send(*wheel_pulses(step.v_left, step.v_right))
                 if sent is not None:
                     last_sent = sent
@@ -95,6 +96,9 @@ def loop() -> None:
                         print(
                             f"red {red_l:.2f} {red_r:.2f}  "
                             f"blue {blue_l:.2f} {blue_r:.2f}  "
+                            f"I {counts.loom[0]:.2f} {counts.loom[1]:.2f}  "
+                            f"deg {math.degrees(counts.theta):.0f}  "
+                            f"exp {counts.theta_dot:.1f}  "
                             f"pulse R:{right} L:{left}  {step.mode}  "
                             f"cam {eye.fps():.1f} fps  steps {plant.mean_ms():.2f} ms"
                         )

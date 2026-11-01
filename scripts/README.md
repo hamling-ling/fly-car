@@ -60,6 +60,12 @@ python3 scripts/build_camera_map.py
 
 `u` は左端が 0、右端が 1 である。`v` は上が 0 である。これらも git には入らない。定量のノートは、この 2 つの npz を読む。
 
+車に載せる表は、このキャッシュと loom 回路の辺から作る。列が同じ後シナプスは本数にまとめ、DNp01 への化学シナプス数を細胞ごとに付ける。出力は `src/flycar/loom_cells.npz` で、リポジトリに入れる。
+
+```bash
+python3 scripts/export_loom_cells.py
+```
+
 Janelia のバケットと NeuPrint から取り直す手順は以下である。
 
 ## NeuPrint の Token を入手

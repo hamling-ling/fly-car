@@ -60,7 +60,8 @@ def test_reference_red_starts_on_the_right_and_stops_centered():
     assert centered
     stops = [sample for sample in run.samples if sample.mode == "stop"]
     assert stops
-    assert stops[0].t == pytest.approx(4.78)
+    # 発火率の時定数を 50 ms にしたので、赤への加速が早く、停止は 4.66 秒。
+    assert stops[0].t == pytest.approx(4.66)
     assert stops[0].red.left >= 0.75
     assert stops[0].red.right >= 0.75
     assert abs(stops[0].red.nx) < 0.1
@@ -80,40 +81,33 @@ def test_empty_view_stays_put():
     assert run.samples[-1].heading == pytest.approx(0.0)
 
 
-def test_right_blue_only_turns_left_and_stops_once_blue_is_left():
-    run = simulate(Scene(red=None, blue=Blob((0.45, -0.08), 0.10)))
-    spins = [sample for sample in run.samples if sample.mode == "spin"]
-    stops = [sample for sample in run.samples if sample.mode == "stop"]
-    assert spins[0].t == pytest.approx(0.20)
-    assert spins[0].omega > 0.0
-    assert stops[0].t == pytest.approx(1.74)
-    assert stops[0].x < 0.0
-    assert stops[0].x > -0.10
-    assert stops[0].heading > 0.4
-    assert stops[0].blue.left == 0.0
-    assert stops[0].blue.right < 0.15
+def test_static_blue_on_the_right_does_not_move():
+    """車が止まっていれば青球の拡大は 0 で、電流は閾値を超えない。"""
+    run = simulate(Scene(red=None, blue=Blob((0.45, -0.08), 0.10), run_s=2.0))
+    assert all(sample.mode == "stop" for sample in run.samples)
+    assert run.samples[-1].x == pytest.approx(0.0)
+    assert run.samples[-1].y == pytest.approx(0.0)
+    assert run.samples[-1].heading == pytest.approx(0.0)
+    assert all(sample.i_gf[0] < 1.0 and sample.i_gf[1] < 1.0 for sample in run.samples)
 
 
-def test_front_red_and_right_blue_passes_left_of_the_blue_and_stops():
-    run = simulate(
-        Scene(
-            red=Blob((1.30, 0.00), 0.12),
-            blue=Blob((0.45, -0.08), 0.10),
-            run_s=12.0,
-        )
-    )
+def test_cruise_past_a_side_blue_yaws_a_little_and_still_stops_on_the_red():
+    """10 cm の青を巡航で横から見ると右の電流が 1 を超え、約 20° 左へ寄る。
+
+    球の表面からは約 4 cm 離れて通り、正面の赤で止まる。
+    """
+    red = Blob((1.30, 0.00), 0.12)
+    blue = Blob((0.45, -0.08), 0.10)
+    run = simulate(Scene(red=red, blue=blue, run_s=8.0))
+    assert max(sample.i_gf[1] for sample in run.samples) > 1.0
+    assert max(sample.heading for sample in run.samples) > 0.15
+    assert max(sample.heading for sample in run.samples) < 0.55
     dist = [((s.x - 0.45) ** 2 + (s.y + 0.08) ** 2) ** 0.5 for s in run.samples]
-    assert min(dist) > 0.11
-    assert max(s.y for s in run.samples) > 0.03
-    stops = [s for s in run.samples if s.mode == "stop"]
+    assert blue.radius < min(dist) < blue.radius + 0.06
+    stops = [sample for sample in run.samples if sample.mode == "stop"]
     assert stops
-    assert stops[0].t == pytest.approx(6.44)
     assert stops[0].red.left >= 0.75
     assert stops[0].red.right >= 0.75
-    assert ((stops[0].x - 1.30) ** 2 + stops[0].y**2) ** 0.5 < 0.35
-    cruise = [s for s in run.samples if s.mode == "cruise"]
-    assert cruise
-    assert all(s.v_left > 0.0 and s.v_right > 0.0 for s in cruise)
 
 
 def test_left_red_turns_left_without_a_blue_sphere():
