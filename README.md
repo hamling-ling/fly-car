@@ -35,7 +35,7 @@ python3 -m pip install numpy matplotlib japanize-matplotlib pandas pyarrow pytes
 
 ### コネクトームの切り出し
 
-結合表の入手、NeuPrint からの取り直し、loom 回路と DNa02 回路の切り出しは [scripts/README.md](scripts/README.md) に書いた。画角のシミュレーションと `pytest` は、この表が無くても動く。
+結合表の入手、NeuPrint からの取り直し、loom 回路と DNa02 回路の切り出し、LC4 と LPLC2 の画面対応は [scripts/README.md](scripts/README.md) に書いた。画角のシミュレーションと `pytest` は、この表が無くても動く。
 
 ## Quick Start
 
