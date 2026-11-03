@@ -2,8 +2,10 @@
 
 LC4 follows expansion through a sigmoid. LPLC2 follows angular size through
 a Gaussian peaked at 40°. A cell contributes its chemical synapse count onto
-the ipsilateral DNp01, multiplied by the fraction of its columns inside the
-blue disk, and the side is divided by that side's total LC4 + LPLC2 count.
+the ipsilateral DNp01, multiplied by the fraction of its columns on blue
+pixels, and the side is divided by that side's total LC4 + LPLC2 count. A
+geometric disk, with no mask, still counts columns inside the equal-area
+circle.
 
 The Gaussian peak 40° and width 20° are the hand-set values from
 ``research/notebooks/loom_sigmoid.ipynb``. That notebook scales the sum by
@@ -12,17 +14,27 @@ that reached about 0.98 under 80/50 reaches about 1.22 here. The sigmoid
 in the notebook is centered at 8 rad/s. This camera clips a blue card once
 it fills the frame, so a hand can only produce about 1 rad/s. The center
 here is 0.20 rad/s and the width is 0.10 rad/s. The LC4 term is then
-multiplied by 5, so a frontal sheet of about 22° at 0.4 rad/s can cross
-threshold even when it straddles the two eyes. A static disk is unchanged,
-because that factor multiplies expansion only. None of these is a fit.
-LPLC2 alone cannot fill the denominator.
+multiplied by 6. Five let a frontal sheet of about 22° at 0.4 rad/s cross
+threshold. Six also lets the weak side of a hand-aimed sheet fire, where
+about 14% of that eye's columns sit on blue pixels. A static disk on one
+eye is unchanged, because that factor multiplies expansion only. A stopped sheet
+that both eyes carry, about 38° and closer, multiplies the size term by
+``LPLC2_SHARE``. None of these is a fit. LPLC2 on one eye still cannot
+fill the denominator.
 
 The camera estimates one disk from the largest blue region. Angular size is
 the equal-area circle of those pixels on the camera's tangent plane.
 Expansion is the increase in that angle since the previous frame that also
 saw a region. A region that appears, or one that shrinks, contributes no
-expansion. Columns come from ``loom_cells.npz``, built by
-``scripts/export_loom_cells.py``.
+expansion. Which columns fire is separate from the circle. LPLC2 counts a
+column when its pixel is blue. LC4 does too, unless the largest region is
+roughly centered: the weaker side of its pixels, split at the middle of the
+frame, is at least ``CENTER_RATIO`` of the stronger side. Then LC4 ignores
+the pixels and counts columns in a fixed band, the middle ±2σ of image
+``u``. σ is ``CENTER_SIGMA``. The careful off-center sheet at ``u = 0.611``
+is 1σ, so the band runs from 0.278 to 0.722. A region that fails the ratio
+keeps the pixel count, and a one-sided sheet still drives one eye. Columns
+come from ``loom_cells.npz``, built by ``scripts/export_loom_cells.py``.
 """
 
 from __future__ import annotations
@@ -40,12 +52,26 @@ SIZE_PEAK_DEG = 40.0
 SIZE_SIGMA_DEG = 20.0
 EARLY_MID = 0.20
 EARLY_WIDTH = 0.10
-# Hand-set. A frontal sheet near 22° at 0.4 rad/s covered too little of
-# either eye for the sigmoid to reach threshold. Five times the LC4 term
-# crosses it. The size term is not scaled, so a stopped disk is unchanged.
-LC4_GAIN = 5.0
+# Hand-set. Five times the LC4 term lets a frontal 22° sheet at 0.4 rad/s
+# reach threshold. Six times lets the weak side of a hand-aimed sheet fire:
+# about 14% of that eye's columns sit on blue pixels, and the equal-area
+# circle scores that side under 1. The size term is not scaled.
+LC4_GAIN = 6.0
+# Hand-set. A stopped sheet filling the frame is about 0.7 a side, under
+# threshold, so the firing dies and the reverse pulse stays under -36.
+# Three times the size term, once both eyes are at or above ``SIZE_BOTH``,
+# puts that sheet near 2. Both wheels then clear the reverse floor.
+# One eye stays under threshold. About 38° is the nearest sheet this catches.
+LPLC2_SHARE = 3.0
+SIZE_BOTH = 0.5
 # Specks smaller than this fraction of the frame are not a disk.
 BLUE_MIN_FRACTION = 0.002
+# Image u. A sheet held carefully at the middle landed at 0.611, which is
+# 0.111 right of center. That offset is 1σ. ±2σ is the LC4 band below.
+CENTER_SIGMA = 0.111
+# Weaker side of the largest region, as a fraction of the stronger side.
+# At or above this, the sheet is roughly centered and LC4 uses the band.
+CENTER_RATIO = 0.25
 
 CELLS_PATH = Path(__file__).with_name("loom_cells.npz")
 
@@ -56,6 +82,15 @@ def camera_tangents(dfov_deg: float = 58.0, aspect: float = 16 / 9) -> tuple[flo
     vertical = half / np.sqrt(aspect**2 + 1.0)
     horizontal = aspect * vertical
     return float(horizontal), float(vertical)
+
+
+def center_band() -> tuple[float, float]:
+    """Image ``u`` interval whose LC4 columns a centered sheet stimulates.
+
+    The interval is the middle ±2σ. σ is the careful off-center offset.
+    """
+    half = 2.0 * CENTER_SIGMA
+    return 0.5 - half, 0.5 + half
 
 
 def anchored_sigmoid(theta_dot: float, mid: float = EARLY_MID, width: float = EARLY_WIDTH) -> float:
@@ -109,6 +144,32 @@ class Population:
         du = (self.u - disk.cu) / disk.ru
         dv = (self.v - disk.cv) / disk.rv
         inside = ((du * du + dv * dv) <= 1.0).astype(np.float64)
+        return self._weighted(inside)
+
+    def in_band(self, lo: float, hi: float) -> np.ndarray:
+        """Return ``sum f_i w_i`` for columns with image ``u`` in ``[lo, hi]``."""
+        inside = ((self.u >= lo) & (self.u <= hi)).astype(np.float64)
+        return self._weighted(inside)
+
+    def painted(self, mask: np.ndarray) -> np.ndarray:
+        """Return ``sum f_i w_i`` for columns whose pixel is set.
+
+        ``mask`` is a boolean image in the same frame as ``u`` and ``v``.
+        A column counts when that pixel is set, whether or not it lies
+        inside the equal-area circle.
+        """
+        image = np.asarray(mask)
+        if image.ndim != 2:
+            raise ValueError("blue mask must be a 2D image")
+        height, width = image.shape
+        if height == 0 or width == 0 or not np.any(image):
+            return np.zeros(2, dtype=np.float64)
+        ui = np.clip(np.rint(self.u * width - 0.5).astype(np.int64), 0, width - 1)
+        vi = np.clip(np.rint(self.v * height - 0.5).astype(np.int64), 0, height - 1)
+        inside = np.asarray(image[vi, ui], dtype=np.float64)
+        return self._weighted(inside)
+
+    def _weighted(self, inside: np.ndarray) -> np.ndarray:
         covered_n = np.add.reduceat(self.n * inside, self.starts)
         frac = covered_n / self.cell_n
         out = np.zeros(2, dtype=np.float64)
@@ -129,13 +190,35 @@ class Cells:
         self.lplc2 = Population(pack, "lplc2")
         self.side_ref = self.lc4.side_sum + self.lplc2.side_sum
 
-    def current(self, disk: Disk, theta_dot: float) -> tuple[float, float]:
-        """DNp01 current on the left and the right. Expansion below zero is ignored."""
+    def current(
+        self,
+        disk: Disk,
+        theta_dot: float,
+        mask: np.ndarray | None = None,
+    ) -> tuple[float, float]:
+        """DNp01 current on the left and the right. Expansion below zero is ignored.
+
+        With ``mask``, LPLC2 counts a column when its pixel is set. LC4 does
+        the same unless ``roughly_centered`` says the largest region sits on
+        both sides of the middle. Then LC4 counts the fixed ±2σ band instead.
+        Without a mask, columns inside the disk's circle count, which is the
+        geometric case.
+        """
         speed = anchored_sigmoid(max(float(theta_dot), 0.0))
         gain = size_gain(disk.theta)
-        lc4 = self.lc4.covered(disk)
-        lplc = self.lplc2.covered(disk)
-        drive = SCALE * (LC4_GAIN * speed * lc4 + gain * lplc) / self.side_ref
+        if mask is None:
+            lc4 = self.lc4.covered(disk)
+            lplc = self.lplc2.covered(disk)
+        elif roughly_centered(mask):
+            lc4 = self.lc4.in_band(*center_band())
+            lplc = self.lplc2.painted(mask)
+        else:
+            lc4 = self.lc4.painted(mask)
+            lplc = self.lplc2.painted(mask)
+        size = SCALE * (gain * lplc) / self.side_ref
+        if float(np.min(size)) >= SIZE_BOTH:
+            size = size * LPLC2_SHARE
+        drive = SCALE * (LC4_GAIN * speed * lc4) / self.side_ref + size
         return float(drive[0]), float(drive[1])
 
 
@@ -181,11 +264,11 @@ def project_rel(
     )
 
 
-def measure_blue(mask: np.ndarray) -> Disk | None:
-    """Fit one disk to the largest blue region in a boolean image.
+def _largest_component(mask: np.ndarray) -> tuple[np.ndarray, np.ndarray, int] | None:
+    """Row and column indices of the largest region, and the image width.
 
-    The region has to cover at least ``BLUE_MIN_FRACTION`` of the frame.
-    Smaller regions, and a frame with no blue, return None.
+    Regions smaller than ``BLUE_MIN_FRACTION`` of the frame, and an empty
+    frame, return None.
     """
     image = np.ascontiguousarray(np.asarray(mask))
     if image.ndim != 2:
@@ -202,7 +285,41 @@ def measure_blue(mask: np.ndarray) -> Disk | None:
     if int(areas.max()) < BLUE_MIN_FRACTION * image.size:
         return None
     ys, xs = np.nonzero(labels == chosen)
-    height, width = image.shape
+    return ys, xs, int(image.shape[1])
+
+
+def roughly_centered(mask: np.ndarray) -> bool:
+    """True when the largest region puts mass on both sides of the middle.
+
+    Pixels are split at image ``u = 0.5``. The weaker count has to be at
+    least ``CENTER_RATIO`` times the stronger count. A region on one side
+    returns False, and so does a speck.
+    """
+    found = _largest_component(mask)
+    if found is None:
+        return False
+    _ys, xs, width = found
+    u = (xs.astype(np.float64) + 0.5) / width
+    left = float(np.count_nonzero(u < 0.5))
+    right = float(np.count_nonzero(u > 0.5))
+    stronger = max(left, right)
+    if stronger <= 0.0:
+        return False
+    return min(left, right) / stronger >= CENTER_RATIO
+
+
+def measure_blue(mask: np.ndarray) -> Disk | None:
+    """Fit one disk to the largest blue region in a boolean image.
+
+    The region has to cover at least ``BLUE_MIN_FRACTION`` of the frame.
+    Smaller regions, and a frame with no blue, return None.
+    """
+    found = _largest_component(mask)
+    if found is None:
+        return None
+    ys, xs, width = found
+    image = np.asarray(mask)
+    height = int(image.shape[0])
     tan_h, tan_v = camera_tangents()
     u = (xs.astype(np.float64) + 0.5) / width
     v = (ys.astype(np.float64) + 0.5) / height
@@ -233,8 +350,17 @@ class LoomTrack:
         self._theta: float | None = None
         self._time: float | None = None
 
-    def update(self, disk: Disk | None, now: float) -> tuple[float, float]:
-        """Return the DNp01 currents for this disk at time ``now`` in seconds."""
+    def update(
+        self,
+        disk: Disk | None,
+        now: float,
+        mask: np.ndarray | None = None,
+    ) -> tuple[float, float]:
+        """Return the DNp01 currents for this disk at time ``now`` in seconds.
+
+        ``mask`` selects columns by blue pixels. Angle and expansion still
+        come from ``disk``.
+        """
         if disk is None:
             self.theta = 0.0
             self.theta_dot = 0.0
@@ -251,5 +377,5 @@ class LoomTrack:
         self._time = float(now)
         self.theta = disk.theta
         self.theta_dot = theta_dot
-        self.current = cells().current(disk, theta_dot)
+        self.current = cells().current(disk, theta_dot, mask)
         return self.current

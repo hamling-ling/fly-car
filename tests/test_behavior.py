@@ -14,7 +14,9 @@ import numpy as np
 import pytest
 
 from flycar.behavior import (
+    BILATERAL_RATIO,
     BLUE_FORWARD,
+    BLUE_SHARE,
     BLUE_YAW,
     COUNT_FLOOR,
     DT,
@@ -82,18 +84,17 @@ def assert_rolling(got: Hold) -> None:
     assert got.v_right > 0.02
 
 
-def assert_spinning(got: Hold, turn: float) -> None:
-    """片側の青は回りながら少し下がる。
+def assert_avoiding(got: Hold, turn: float) -> None:
+    """片側の青は両輪とも後退し、脅威と反対の輪がより強く下がる。
 
-    1.5 秒では方位が一周して出発点の近くに戻るので、終わりの方位では向きを見ない。
+    turn > 0 は左への回避。どちらの輪も前には回らない。
     """
-    assert got.mode == "spin"
-    assert turn * got.omega > 2.0
+    assert got.mode == "back"
+    assert got.v_left <= 0.0
+    assert got.v_right <= 0.0
+    assert turn * got.omega > 0.5
     assert turn * (got.v_right - got.v_left) > 0.0
-    assert got.v_left * got.v_right < 0
-    assert got.speed < -0.02
-    assert abs(got.x) < 0.02
-    assert abs(got.y) < 0.02
+    assert got.speed < 0.0
 
 
 def assert_arc(got: Hold, turn: float) -> None:
@@ -151,15 +152,41 @@ class TestNothing:
         """前後は赤の和から青の和の BLUE_FORWARD 倍を引き、ヨーは重み付きの差を足す。"""
         speed, omega = speed_and_yaw(5.0, 20.0, 10.0, 40.0)
         forward = (5.0 + 20.0) - BLUE_FORWARD * (10.0 + 40.0)
-        yaw = RED_YAW * (5.0 - 20.0) + BLUE_YAW * (40.0 - 10.0)
+        # Blue yaw reverses only the far wheel, so it contributes half to body yaw.
+        yaw = RED_YAW * (5.0 - 20.0) + 0.5 * BLUE_YAW * (40.0 - 10.0)
         assert speed == pytest.approx(forward * FORWARD_PER_HZ)
         assert omega == pytest.approx(yaw * YAW_PER_HZ)
+
+    def test_a_shared_sheet_drops_the_blue_yaw(self) -> None:
+        """弱い電流が強い電流の 1/4 以上なら、青のヨーは出ない。"""
+        assert BILATERAL_RATIO == pytest.approx(0.25)
+        speed, omega = speed_and_yaw(0.0, 0.0, 120.0, 40.0, (1.6, 0.5))
+        assert omega == pytest.approx(0.0, abs=1e-12)
+        assert speed < 0.0
+        _, turning = speed_and_yaw(0.0, 0.0, 120.0, 0.0, (2.0, 0.4))
+        assert turning == pytest.approx(0.5 * BLUE_YAW * -120.0 * YAW_PER_HZ)
+
+    def test_both_halves_above_the_share_drop_the_blue_yaw(self) -> None:
+        """弱い側の青が 0.15 以上なら、電流が片側だけでもヨーは出ない。"""
+        assert BLUE_SHARE == pytest.approx(0.15)
+        _, shared = speed_and_yaw(0.0, 0.0, 120.0, 0.0, (4.8, 0.0), (0.51, 0.15))
+        assert shared == pytest.approx(0.0, abs=1e-12)
+        held = hold(0.0, 0.0, 0.51, 0.15, seconds=0.4, settle=0.1, loom=(4.8, 0.0))
+        assert held.omega == pytest.approx(0.0, abs=1e-9)
+        assert held.heading == pytest.approx(0.0, abs=1e-6)
+        _, turning = speed_and_yaw(0.0, 0.0, 120.0, 0.0, (3.3, 0.0), (0.46, 0.05))
+        assert turning == pytest.approx(0.5 * BLUE_YAW * -120.0 * YAW_PER_HZ)
+
+    def test_red_yaw_stays_when_the_blue_yaw_is_dropped(self) -> None:
+        """青のヨーが消えても、赤の左右差のヨーは残る。"""
+        _, omega = speed_and_yaw(10.0, 40.0, 80.0, 20.0, (1.5, 1.5))
+        assert omega == pytest.approx(RED_YAW * (10.0 - 40.0) * YAW_PER_HZ)
 
     def test_red_sum_keeps_forward_against_a_smaller_blue(self) -> None:
         """青の重み付き和が赤の和より小さいと、前進が残る。"""
         speed, omega = speed_and_yaw(80.0, 80.0, 0.0, 40.0)
         assert speed == pytest.approx((160.0 - BLUE_FORWARD * 40.0) * FORWARD_PER_HZ)
-        assert omega == pytest.approx(BLUE_YAW * 40.0 * YAW_PER_HZ)
+        assert omega == pytest.approx(0.5 * BLUE_YAW * 40.0 * YAW_PER_HZ)
 
     def test_red_at_the_floor_does_not_fire(self) -> None:
         """床ちょうどは電流 1 で、スパイクせず止まる。"""
@@ -191,13 +218,17 @@ class TestStep2:
         assert got.v_left < -0.03
         assert got.v_right < -0.03
 
-    def test_right_loom_spins_left(self) -> None:
-        """赤が無いとき、右の DNp01 で下がりながら左へ回る。"""
-        assert_spinning(show(NO_RED, loom=LOOM_RIGHT), turn=1.0)
+    def test_right_loom_backs_the_left_wheel(self) -> None:
+        """赤が無いとき、右の DNp01 は左輪をより強く後退させ、右輪も少し下がる。"""
+        got = show(NO_RED, loom=LOOM_RIGHT)
+        assert_avoiding(got, turn=1.0)
+        assert got.v_left < got.v_right
 
-    def test_left_loom_spins_right(self) -> None:
-        """赤が無いとき、左の DNp01 で下がりながら右へ回る。"""
-        assert_spinning(show(NO_RED, loom=LOOM_LEFT), turn=-1.0)
+    def test_left_loom_backs_the_right_wheel(self) -> None:
+        """赤が無いとき、左の DNp01 は右輪をより強く後退させ、左輪も少し下がる。"""
+        got = show(NO_RED, loom=LOOM_LEFT)
+        assert_avoiding(got, turn=-1.0)
+        assert got.v_right < got.v_left
 
     def test_bilateral_loom_clears_the_reverse_floor(self) -> None:
         """左右の DNp01 が頭打ちのとき、送る両輪が後退の下限を超える。"""
@@ -227,25 +258,27 @@ class TestStep3:
         assert 0.02 < got.speed < alone.speed
 
     def test_right_loom_dodges_left(self) -> None:
-        """正面の赤に右の速い loom が重なると、左輪が後退して大きく左へ回る。"""
+        """正面の赤に右の loom が重なると、左輪が後退して左へ回る。右輪は経路速度のまま前を向く。"""
         got = show(FRONT_RED, loom=LOOM_RIGHT)
         assert got.speed > 0.1
         assert got.omega > 2.0
         assert got.v_left < 0.0
-        assert got.v_right > 0.2
+        assert got.v_right == pytest.approx(got.speed)
+        assert got.v_right > 0.1
 
     def test_left_loom_dodges_right(self) -> None:
-        """正面の赤に左の速い loom が重なると、右輪が後退して大きく右へ回る。"""
+        """正面の赤に左の loom が重なると、右輪が後退して右へ回る。左輪は経路速度のまま前を向く。"""
         got = show(FRONT_RED, loom=LOOM_LEFT)
         assert got.speed > 0.1
         assert got.omega < -2.0
         assert got.v_right < 0.0
-        assert got.v_left > 0.2
+        assert got.v_left == pytest.approx(got.speed)
+        assert got.v_left > 0.1
 
 
 class TestStep4:
     def test_right_loom_out_turns_a_right_red(self) -> None:
-        """片側の赤を、同じ側の速い loom が上回って左へ回る。内側の左輪は後退する。"""
+        """同じ側の loom が片側の赤を上回って左へ回る。左輪は後退し、右輪は前を向いたまま赤だけより遅い。"""
         alone = show(RIGHT_RED)
         got = show(RIGHT_RED, loom=LOOM_RIGHT)
         assert got.mode == "cruise"
@@ -253,7 +286,7 @@ class TestStep4:
         assert got.omega > 2.0
         assert got.speed < alone.speed
         assert got.v_left < 0.0
-        assert got.v_right > 0.2
+        assert 0.0 < got.v_right < alone.v_right
 
     def test_left_loom_adds_to_a_right_red(self) -> None:
         """右の赤と左の DNp01 は同じ向きのヨーなので、赤だけのときより強く回る。"""
@@ -265,7 +298,7 @@ class TestStep4:
 
 class TestStep5:
     def test_left_loom_out_turns_a_left_red(self) -> None:
-        """片側の赤を、同じ側の速い loom が上回って右へ回る。内側の右輪は後退する。"""
+        """同じ側の loom が片側の赤を上回って右へ回る。右輪は後退し、左輪は前を向いたまま赤だけより遅い。"""
         alone = show(LEFT_RED)
         got = show(LEFT_RED, loom=LOOM_LEFT)
         assert got.mode == "cruise"
@@ -273,7 +306,7 @@ class TestStep5:
         assert got.omega < -2.0
         assert got.speed < alone.speed
         assert got.v_right < 0.0
-        assert got.v_left > 0.2
+        assert 0.0 < got.v_left < alone.v_left
 
     def test_right_loom_adds_to_a_left_red(self) -> None:
         """左の赤と右の DNp01 は同じ向きのヨーなので、赤だけのときより強く回る。"""

@@ -77,6 +77,6 @@ def straighten(right: int, left: int) -> tuple[int, int]:
 
 
 def calibrated_command(right: int, left: int) -> tuple[int, int]:
-    """Straighten the left wheel, then drop commands below the start floor."""
+    """Straighten the left wheel, then apply ``motion_pulse``."""
     right, left = straighten(right, left)
     return motion_pulse(right), motion_pulse(left)

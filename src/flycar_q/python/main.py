@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import math
 import time
 
 import bootstrap
@@ -15,15 +14,17 @@ bootstrap.install()
 
 from arduino.app_utils import App, Bridge
 
-from flycar.behavior import Plant
+from flycar.behavior import Plant, blue_yaw_scale
 from flycar.occupancy import Counts
 from flycar.pulse import wheel_pulses
 
 from camera import Eye
-from config import COUNT_S, LOG_S, MIRROR, TICK_S
+from config import COUNT_S, DETAIL_S, LOG_S, MIRROR, TICK_S
 from face import frame, lamps
 from motors import send, wait_until_bridge
 from schedule import Next
+from shots import Shots
+from trace import trace_line, trace_mark
 
 _face_error: str | None = None
 
@@ -65,21 +66,29 @@ def loop() -> None:
     eye = Eye()
     plant = Plant()
     counts = Counts()
+    shots = Shots()
     try:
         eye.start()
         if not eye.wait_ready():
             print("camera: フレームが来てから走り始める")
+        held, held_seen = eye.shot()
+        opened = shots.save(held, held_seen)
+        if opened:
+            print(f"camera: frame {opened}")
         next_count = Next(COUNT_S)
         next_tick = Next(TICK_S)
         next_log = Next(LOG_S)
+        next_detail = Next(DETAIL_S)
         last_sent = (0, 0)
         last_mode = "stop"
+        last_mark: tuple[object, ...] | None = None
         while True:
             now = time.monotonic()
             counted = False
             if next_count.tick(now):
                 counted = True
-                if not counts.update(eye.latest(), mirror=MIRROR, now=now):
+                held, held_seen = eye.shot()
+                if not counts.update(held, mirror=MIRROR, now=now):
                     stopped = send(0, 0)
                     if stopped is not None:
                         last_sent = stopped
@@ -90,18 +99,56 @@ def loop() -> None:
                 if sent is not None:
                     last_sent = sent
                     last_mode = step.mode
-                    if next_log.tick(now):
-                        right, left = sent
+                    heartbeat = next_log.tick(now)
+                    detail = next_detail.tick(now)
+                    scale = blue_yaw_scale(*counts.loom, counts.values[2:])
+                    raw = wheel_pulses(step.v_left, step.v_right)
+                    dnp = (plant.gf_l.rate, plant.gf_r.rate)
+                    mark = trace_mark(
+                        scale,
+                        counts.loom,
+                        counts.theta,
+                        counts.theta_dot,
+                        dnp,
+                        raw,
+                        sent,
+                        step.mode,
+                    )
+                    active = (
+                        max(counts.loom) >= 0.05
+                        or max(dnp) >= 1.0
+                        or step.mode != "stop"
+                        or sent != (0, 0)
+                    )
+                    if heartbeat or mark != last_mark or (detail and active):
+                        last_mark = mark
                         red_l, red_r, blue_l, blue_r = counts.values
-                        print(
-                            f"red {red_l:.2f} {red_r:.2f}  "
-                            f"blue {blue_l:.2f} {blue_r:.2f}  "
-                            f"I {counts.loom[0]:.2f} {counts.loom[1]:.2f}  "
-                            f"deg {math.degrees(counts.theta):.0f}  "
-                            f"exp {counts.theta_dot:.1f}  "
-                            f"pulse R:{right} L:{left}  {step.mode}  "
-                            f"cam {eye.fps():.1f} fps  steps {plant.mean_ms():.2f} ms"
+                        line = trace_line(
+                            (red_l, red_r),
+                            (blue_l, blue_r),
+                            counts.loom,
+                            scale,
+                            counts.theta,
+                            counts.theta_dot,
+                            dnp,
+                            (plant.dna_l.rate, plant.dna_r.rate),
+                            step.speed,
+                            step.omega,
+                            (step.v_right, step.v_left),
+                            raw,
+                            sent,
+                            step.mode,
                         )
+                        if heartbeat:
+                            line += (
+                                f"  cam {eye.fps():.1f} fps  "
+                                f"steps {plant.mean_ms():.2f} ms"
+                            )
+                        if active or max(counts.values) >= 0.002:
+                            name = shots.save(held, held_seen)
+                            if name:
+                                line += f"  img {name}"
+                        print(line)
             if counted:
                 red_l, red_r, blue_l, blue_r = counts.values
                 publish_face(red_l, red_r, blue_l, blue_r, last_sent, last_mode)

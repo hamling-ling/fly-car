@@ -30,12 +30,13 @@ def test_clamps_to_the_sketch_limit() -> None:
     assert wheel_pulse(-CRUISE_MPS * 10) == -PULSE_LIMIT
 
 
-def test_motion_floor_keeps_only_commands_that_start_the_chassis() -> None:
+def test_motion_pulse_drops_a_forward_twitch_and_shifts_reverse() -> None:
     assert motion_pulse(0) == 0
     assert motion_pulse(FORWARD_START - 1) == 0
     assert motion_pulse(FORWARD_START) == FORWARD_START
-    assert motion_pulse(-(REVERSE_START - 1)) == 0
-    assert motion_pulse(-REVERSE_START) == -REVERSE_START
+    assert motion_pulse(-(REVERSE_START - 1)) == -(REVERSE_START - 1) - REVERSE_START
+    assert motion_pulse(-REVERSE_START) == -2 * REVERSE_START
+    assert motion_pulse(-34) == -34 - REVERSE_START
     assert motion_pulse(PULSE_LIMIT) == PULSE_LIMIT
     assert motion_pulse(-PULSE_LIMIT) == -PULSE_LIMIT
     assert motion_pulse(wheel_pulse(CRUISE_MPS)) == CRUISE_PULSE

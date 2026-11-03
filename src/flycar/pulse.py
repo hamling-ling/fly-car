@@ -3,9 +3,11 @@
 The sketch takes the same -255..255 command as motor_test. Positive is
 forward. 0.20 m/s is the frontal-red cruise noted in behavior.py, and 160
 is the pulse the radio-control slider used for a comfortable roll. Nothing
-here has been timed against the real wheels. ``motion_pulse`` drops
-commands that, on the table on 2026-10-17, only twitched or stopped when
-touched. The radio-control app does not call it.
+here has been timed against the real wheels. ``motion_pulse`` drops a
+forward command that, on the table on 2026-10-17, only twitched or stopped
+when touched. A reverse command is shifted by ``-REVERSE_START`` instead,
+so a slow reverse clears that same dead band. The radio-control app does
+not call it.
 """
 
 from __future__ import annotations
@@ -17,7 +19,8 @@ PULSE_LIMIT = 255
 # 2026-10-17 table. Both wheels: 1500 + trunc(pulse / 255 * 500) µs.
 # Forward 13 is 1525 µs. 0..12 creeps or stops at a touch.
 # Reverse 36 is 1430 µs. 1..35 in reverse yaws clockwise: the right wheel
-# turns before the left. The floors are shared. No per-wheel reverse offset.
+# turns before the left. motion_pulse subtracts this shared offset from
+# every negative command. There is no per-wheel reverse offset.
 FORWARD_START = 13
 REVERSE_START = 36
 
@@ -33,13 +36,19 @@ def wheel_pulse(meters_per_second: float) -> int:
 
 
 def motion_pulse(pulse: int) -> int:
-    """Return ``pulse``, or 0 when the chassis has not started moving.
+    """Return the pulse the chassis can follow. Each wheel is judged alone.
 
-    13 and above, and -36 and below, pass through. Each wheel is judged
-    on its own, so a turn whose inner command is 12 or less stops that wheel.
+    Forward below 13 stays 0. Reverse is shifted by ``-REVERSE_START``, so
+    −1 is sent as −37 and −34 as −70. 0 stays 0. The result stays in
+    −255..255.
     """
     command = int(pulse)
-    if command >= FORWARD_START or command <= -REVERSE_START:
+    if command < 0:
+        shifted = command - REVERSE_START
+        if shifted < -PULSE_LIMIT:
+            return -PULSE_LIMIT
+        return shifted
+    if command >= FORWARD_START:
         return command
     return 0
 

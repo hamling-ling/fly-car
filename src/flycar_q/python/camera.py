@@ -103,6 +103,14 @@ class Eye:
         with self._lock:
             return None if self._frame is None else self._frame.copy()
 
+    def shot(self) -> tuple[object, int]:
+        """Copy of the newest frame and how many captures have arrived."""
+        with self._lock:
+            seen = self._seen
+            if self._frame is None:
+                return None, seen
+            return self._frame.copy(), seen
+
     def wait_ready(self, timeout_s: float = 20.0) -> bool:
         deadline = timeout_s
         waited = 0.0

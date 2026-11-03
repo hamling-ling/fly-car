@@ -11,22 +11,38 @@ The wheels read the firing rates directly:
 
 - forward speed is the red sum minus ``BLUE_FORWARD`` times the blue sum.
   A negative result reverses; it is not clipped to a stop
-- yaw is ``RED_YAW`` times the red difference plus ``BLUE_YAW`` times the
-  blue difference. Positive yaw is a left turn, so a right-hand red turns
-  right and a right-hand DNp01 turns left
+- red yaw is ``RED_YAW`` times the red difference and is split across both
+  wheels. Positive yaw is a left turn, so a right-hand red turns right
+- blue yaw is ``BLUE_YAW`` times the blue difference, and that term is
+  dropped when both eyes share the sheet. It is extra reverse on the wheel
+  away from the stronger eye. The near wheel keeps the path speed. A
+  right-hand DNp01 turns left. Blue drives neither wheel forward
 
-``BLUE_FORWARD`` is less than one, so a one-sided DNp01 turns harder than it
-brakes. ``RED_RADIUS`` is 0.20 m. At 0.10 m a diagonal red yawed out of the
-camera before the two halves could even out. ``BLUE_YAW`` is 18 and the rate filter is 50 ms, both hand-set. One new
-camera frame holds a current for about 0.1 s and then expansion drops to 0.
-At 3.6 that frame turned about 6°. 18 turns the same spikes about 30°.
-The total angle scales with this coefficient. It is not a fit.
+``BLUE_FORWARD`` is less than one, so matched rates leave the red forward
+speed. ``RED_RADIUS`` is 0.20 m. At 0.10 m a diagonal red yawed out of the
+camera before the two halves could even out. ``BLUE_YAW`` is 18 and the
+rate filter is 50 ms, both hand-set. One new camera frame holds a current
+for about 0.1 s and then expansion drops to 0. Split across both wheels,
+3.6 turned that frame about 6° and 18 about 30°. Only the far wheel takes
+the blue term now, so the body turns about half of that, near 15°. The far
+wheel's reverse speed is the one the split law already used. The total
+angle scales with this coefficient. It is not a fit.
+``BILATERAL_RATIO`` is 0.25, also hand-set. When the weaker current is at
+least this fraction of the stronger, the blue yaw is 0. A factor between
+0 and 1 still turns, so the factor is only 0 or 1. A sheet on one eye
+stays under the fraction and keeps the yaw. ``BLUE_SHARE`` is 0.15,
+hand-set from a centered sheet whose mask was lopsided: both halves at or
+above that fill drop the blue yaw even when the weak current is still 0.
+A half under it, such as 0.46 against 0.05, keeps the yaw.
 
 Nothing is firing, so an empty frame and a subthreshold red both stop.
 Equal DNp01 rates cancel yaw. Both cells sit on the refractory ceiling once
 their current is well above 1, so matched looming on both sides has no yaw
-left and the negative forward term backs the car straight up. One side
-keeps a yaw, so the car backs up while it turns.
+left and the negative forward term backs the car straight up. A shared
+sheet also drops the blue yaw while the rates are still unequal, so a
+near-frontal sheet holds still or backs up. One eye keeps a yaw. That yaw
+adds reverse on the far wheel, and the near wheel stays on the reverse
+path speed, so the car backs away without a wheel turning forward.
 
 The one hand-written exception is a safety stop. When both red halves are
 at least ``RED_FILL``, both wheels are held at rest even though DNa02 is
@@ -73,13 +89,25 @@ COUNT_FLOOR = 0.04
 # is firing. 0.20 m halves the yaw rate of the 0.10 m arc, which swung a
 # diagonal red out of the camera. The radius stays above TRACK/2, so both
 # wheels stay forward and the inner one runs at 0.7 times the path speed.
-# BLUE_YAW is 18 so one 0.1 s frame near current 1.8 turns about 30°.
-# 3.6 turned that frame about 6°. Hand-set, not a fit.
+# BLUE_YAW is 18. Split across both wheels, one 0.1 s frame near current
+# 1.8 turned about 30°, and 3.6 turned it about 6°. Body yaw is now half
+# of that split angle, because only the far wheel takes the blue term.
+# Hand-set, not a fit.
 # BLUE_FORWARD leaves forward speed when the rates match.
 FORWARD_PER_HZ = 0.0006
 YAW_PER_HZ = 0.0024
 BLUE_YAW = 18.0
 BLUE_FORWARD = 0.35
+# Hand-set. The weaker DNp01 current has to be under this fraction of the
+# stronger one for the blue yaw to stay on. At or above it, both eyes see
+# the sheet and the blue yaw is 0. See the module docstring.
+BILATERAL_RATIO = 0.25
+# Hand-set. A centered sheet can still paint one half much more than the
+# other, and the weak eye's current then stays 0, so the ratio above never
+# opens. Both halves at or above this fill drop the blue yaw anyway.
+# 0.15 is the weak half of a frame that spun hard (0.51 against 0.15).
+# A weak half of 0.02 to 0.10 keeps the yaw.
+BLUE_SHARE = 0.15
 RED_RADIUS = 0.20
 RED_YAW = FORWARD_PER_HZ / (YAW_PER_HZ * RED_RADIUS)
 
@@ -131,20 +159,77 @@ def _loom_current(loom: tuple[float, float]) -> tuple[float, float]:
     return (max(float(loom[0]), 0.0), max(float(loom[1]), 0.0))
 
 
-def speed_and_yaw(dna_l: float, dna_r: float, gf_l: float, gf_r: float) -> tuple[float, float]:
+def blue_yaw_scale(
+    i_l: float,
+    i_r: float,
+    blue: tuple[float, float] = (0.0, 0.0),
+) -> float:
+    """1 when one eye owns the sheet, 0 when both eyes share it.
+
+    Sharing means the weaker current is at least ``BILATERAL_RATIO`` times
+    the stronger, or both half-fills are at least ``BLUE_SHARE``. With no
+    current and a one-sided fill the scale stays 1, and the rates are 0.
+    """
+    left = max(float(i_l), 0.0)
+    right = max(float(i_r), 0.0)
+    stronger = max(left, right)
+    shared_current = stronger > 0.0 and min(left, right) / stronger >= BILATERAL_RATIO
+    shared_fill = min(max(float(blue[0]), 0.0), max(float(blue[1]), 0.0)) >= BLUE_SHARE
+    if shared_current or shared_fill:
+        return 0.0
+    return 1.0
+
+
+def speed_and_yaw(
+    dna_l: float,
+    dna_r: float,
+    gf_l: float,
+    gf_r: float,
+    loom: tuple[float, float] = (0.0, 0.0),
+    blue: tuple[float, float] = (0.0, 0.0),
+) -> tuple[float, float]:
     """Forward speed in m/s and yaw in rad/s. Positive yaw turns left.
 
     Forward is the red sum minus a fraction of the DNp01 sum. A negative sum
     reverses at the same coefficient, so matched looming on both sides backs
     away even after the two cells have saturated and the yaw has cancelled.
-    Yaw weights the DNp01 difference more than the red difference, so a
-    one-sided obstacle out-turns the attractant.
+    Red yaw is the red difference. Blue yaw is the DNp01 difference, omitted
+    when ``blue_yaw_scale`` says both eyes share the sheet. The returned yaw
+    is the yaw the wheels make: red is applied to both, and blue only as
+    extra reverse on the wheel away from the stronger eye, so blue's share
+    of the body yaw is half of ``BLUE_YAW`` times the rate difference.
+    """
+    speed, omega, _left, _right = wheel_speeds(dna_l, dna_r, gf_l, gf_r, loom, blue)
+    return speed, omega
+
+
+def wheel_speeds(
+    dna_l: float,
+    dna_r: float,
+    gf_l: float,
+    gf_r: float,
+    loom: tuple[float, float] = (0.0, 0.0),
+    blue: tuple[float, float] = (0.0, 0.0),
+) -> tuple[float, float, float, float]:
+    """Return path speed, body yaw, left wheel, and right wheel.
+
+    Red yaw splits across the axle. Blue yaw only pushes the far wheel
+    backward: a right-hand DNp01 reverses the left wheel and leaves the
+    right wheel on the path speed. With no red, that path speed is reverse,
+    so the right wheel creeps backward and the left wheel reverses harder.
     """
     forward = (dna_l + dna_r) - BLUE_FORWARD * (gf_l + gf_r)
-    yaw = RED_YAW * (dna_l - dna_r) + BLUE_YAW * (gf_r - gf_l)
+    red_omega = RED_YAW * (dna_l - dna_r) * YAW_PER_HZ
+    blue_omega = BLUE_YAW * blue_yaw_scale(*loom, blue) * (gf_r - gf_l) * YAW_PER_HZ
     speed = forward * FORWARD_PER_HZ
-    omega = yaw * YAW_PER_HZ
-    return speed, omega
+    v_left = speed - red_omega * TRACK / 2
+    v_right = speed + red_omega * TRACK / 2
+    if blue_omega > 0.0:
+        v_left -= blue_omega * TRACK / 2
+    elif blue_omega < 0.0:
+        v_right -= -blue_omega * TRACK / 2
+    omega = (v_right - v_left) / TRACK
+    return speed, omega, v_left, v_right
 
 
 def motion_mode(speed: float, v_left: float, v_right: float) -> str:
@@ -156,12 +241,6 @@ def motion_mode(speed: float, v_left: float, v_right: float) -> str:
     if v_left < 0.0 and v_right < 0.0:
         return "back"
     return "cruise"
-
-
-def wheels(omega: float, speed: float) -> tuple[float, float]:
-    v_left = speed - omega * TRACK / 2
-    v_right = speed + omega * TRACK / 2
-    return v_left, v_right
 
 
 @dataclass
@@ -204,7 +283,7 @@ class Plant:
         self.gf_r.step(i_gf[1])
         self.dna_l.step(i_dna[0])
         self.dna_r.step(i_dna[1])
-        return self._emit(red_l, red_r, blue_l, blue_r, DT)
+        return self._emit(red_l, red_r, blue_l, blue_r, i_gf, DT)
 
     def steps(
         self,
@@ -232,7 +311,7 @@ class Plant:
             self.gf_r.step(i_gf[1])
             self.dna_l.step(i_dna[0])
             self.dna_r.step(i_dna[1])
-        step = self._emit(red_l, red_r, blue_l, blue_r, DT * n)
+        step = self._emit(red_l, red_r, blue_l, blue_r, i_gf, DT * n)
         self._step_s += time.monotonic() - began
         self._step_n += 1
         return step
@@ -252,19 +331,22 @@ class Plant:
         red_r: float,
         blue_l: float,
         blue_r: float,
+        loom: tuple[float, float],
         dt: float,
     ) -> Step:
         if red_fills_the_frame(red_l, red_r):
             speed = 0.0
             omega = 0.0
+            v_left, v_right = 0.0, 0.0
         else:
-            speed, omega = speed_and_yaw(
+            speed, omega, v_left, v_right = wheel_speeds(
                 self.dna_l.rate,
                 self.dna_r.rate,
                 self.gf_l.rate,
                 self.gf_r.rate,
+                loom,
+                (blue_l, blue_r),
             )
-        v_left, v_right = wheels(omega, speed)
         mode = motion_mode(speed, v_left, v_right)
         self.x += speed * float(np.cos(self.heading)) * dt
         self.y += speed * float(np.sin(self.heading)) * dt

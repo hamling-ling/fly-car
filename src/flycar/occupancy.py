@@ -6,7 +6,8 @@ whose color falls in the red or blue range. Position inside the half does
 not matter.
 
 The blue fill is for the face and the log. It is not the DNp01 current.
-``Counts.loom`` is that current, from ``flycar.loom``.
+``Counts.loom`` is that current, from ``flycar.loom``. Angle and expansion
+come from the largest region. A column counts when its pixel is blue.
 
 The gates are read once from ``color_thresholds.json`` beside this file.
 ``research/color_capture_q/fit_thresholds.py`` writes that file. Restart the
@@ -177,7 +178,7 @@ class Counts:
             blue = np.ascontiguousarray(np.fliplr(blue))
         self.values = _halves(red, blue, mirror=False)
         when = 0.0 if now is None else float(now)
-        self.loom = self._track.update(measure_blue(blue), when)
+        self.loom = self._track.update(measure_blue(blue), when, blue)
         self.theta = self._track.theta
         self.theta_dot = self._track.theta_dot
         return True
