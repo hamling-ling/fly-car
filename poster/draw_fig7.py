@@ -38,7 +38,6 @@ SPINE = "#c9c1b4"
 UM = 8.0 / 1000.0
 BG_N = 25_000
 SYN_N = 12_000
-RNG = np.random.default_rng(0)
 
 # Native MaleCNS axes: +x is the fly's left, +y is ventral, +z is posterior.
 # Each panel is the view from the positive missing axis. On x-y the page
@@ -70,8 +69,9 @@ def image_uv(ab, side, left_ab, right_ab):
     return u, v
 
 
-def load():
-    """Somas, a thinned brain outline, and LC4 postsynapses in micrometres."""
+def load(spec: dict):
+    """Somas, a thinned brain outline, and one cell type's postsynapses in micrometres."""
+    rng = np.random.default_rng(0)
     ann = feather.read_table(ANN, columns=["bodyId", "type", "somaLocation"]).to_pandas()
     soma_rows = []
     for value in ann.somaLocation:
@@ -81,15 +81,15 @@ def load():
             soma_rows.append([np.nan, np.nan, np.nan])
     soma = np.asarray(soma_rows, dtype=np.float64) * UM
     has_soma = np.isfinite(soma).all(axis=1)
-    lc4_mask = (ann.type == "LC4").to_numpy() & has_soma
-    bg_pool = np.flatnonzero(has_soma & ~lc4_mask)
-    bg = soma[RNG.choice(bg_pool, size=BG_N, replace=False)]
+    own = (ann.type == spec["cell_type"]).to_numpy() & has_soma
+    bg_pool = np.flatnonzero(has_soma & ~own)
+    bg = soma[rng.choice(bg_pool, size=BG_N, replace=False)]
 
-    pack = np.load(CACHE)
-    syn_um = pack["xyz"].astype(np.float64) * UM
-    u, v = image_uv(pack["ab"], pack["side"], pack["left_ab"], pack["right_ab"])
-    order = np.argsort(pack["body"], kind="mergesort")
-    body_s = pack["body"][order]
+    pack = np.load(spec["cache"])
+    syn_um = pack[spec["xyz"]].astype(np.float64) * UM
+    u, v = image_uv(pack[spec["ab"]], pack[spec["side"]], pack[spec["left"]], pack[spec["right"]])
+    order = np.argsort(pack[spec["body"]], kind="mergesort")
+    body_s = pack[spec["body"]][order]
     syn_s = syn_um[order]
     u_s, v_s = u[order], v[order]
     cuts = np.flatnonzero(np.diff(body_s)) + 1
@@ -101,13 +101,13 @@ def load():
     id_to_soma = {
         int(body): soma[index]
         for index, body in enumerate(ann.bodyId.to_numpy())
-        if lc4_mask[index]
+        if own[index]
     }
     missing = [int(body) for body in cell_id if int(body) not in id_to_soma]
     if missing:
-        raise RuntimeError(f"{len(missing)} LC4 cells have no soma")
+        raise RuntimeError(f"{len(missing)} {spec['cell_type']} cells have no soma")
     cell_soma = np.array([id_to_soma[int(body)] for body in cell_id])
-    syn_take = RNG.choice(len(syn_um), size=SYN_N, replace=False)
+    syn_take = rng.choice(len(syn_um), size=SYN_N, replace=False)
     return soma, bg, cell_soma, cell_u, cell_v, cell_xyz, syn_um, syn_um[syn_take], u[syn_take]
 
 
@@ -126,7 +126,7 @@ def style_view(ax) -> None:
     ax.yaxis.label.set_color(INK)
 
 
-def draw_views(axes, soma, bg, cell_soma, cell_u, syn, syn_u, norm) -> None:
+def draw_views(axes, soma, bg, cell_soma, cell_u, syn, syn_u, norm, title: str) -> None:
     limits = []
     for i, j, _, _, _, _ in VIEWS:
         pad_i = 0.02 * (np.nanmax(soma[:, i]) - np.nanmin(soma[:, i]))
@@ -244,7 +244,7 @@ def draw_views(axes, soma, bg, cell_soma, cell_u, syn, syn_u, norm) -> None:
                 zorder=5,
             )
     axes[0].set_title(
-        "LC4 の細胞体と小葉後シナプス",
+        title,
         fontproperties=GOTHIC,
         fontsize=13,
         color=INK,
@@ -349,8 +349,39 @@ def draw_plane(ax, cell_xyz, cell_u, cell_v, syn, norm) -> None:
             label.set_fontsize(8)
 
 
-def main() -> None:
-    soma, bg, cell_soma, cell_u, cell_v, cell_xyz, syn_all, syn, syn_u = load()
+LC4 = {
+    "cache": CACHE,
+    "out": OUT,
+    "cell_type": "LC4",
+    "body": "body",
+    "xyz": "xyz",
+    "ab": "ab",
+    "side": "side",
+    "left": "left_ab",
+    "right": "right_ab",
+    "title": "LC4 の細胞体と小葉後シナプス",
+    "legend_soma": "LC4 の細胞体",
+    "legend_syn": "LC4 の小葉後シナプス",
+}
+
+LPLC2 = {
+    "cache": ROOT / "data" / "malecns" / "lplc2-camera" / "lplc2_lobula_posts.npz",
+    "out": Path(__file__).with_name("fig8_plate"),
+    "cell_type": "LPLC2",
+    "body": "lop_body",
+    "xyz": "lop_xyz",
+    "ab": "lop_ab",
+    "side": "lop_side",
+    "left": "lop_left_ab",
+    "right": "lop_right_ab",
+    "title": "LPLC2 の細胞体と小葉板後シナプス",
+    "legend_soma": "LPLC2 の細胞体",
+    "legend_syn": "LPLC2 の小葉板後シナプス",
+}
+
+
+def render(spec: dict) -> None:
+    soma, bg, cell_soma, cell_u, cell_v, cell_xyz, syn_all, syn, syn_u = load(spec)
     norm = Normalize(vmin=0.0, vmax=1.0)
     # Display widths follow each view's micrometre span, so equal aspect
     # fills the row. x is the wide axis, z the tall one.
@@ -370,7 +401,7 @@ def main() -> None:
     views = [fig.add_subplot(top[0, index]) for index in range(3)]
     scale = fig.add_subplot(top[0, 3])
     plane = fig.add_subplot(grid[1], projection="3d")
-    draw_views(views, soma, bg, cell_soma, cell_u, syn, syn_u, norm)
+    draw_views(views, soma, bg, cell_soma, cell_u, syn, syn_u, norm, spec["title"])
     draw_plane(plane, cell_xyz, cell_u, cell_v, syn_all, norm)
 
     legend = [
@@ -384,7 +415,7 @@ def main() -> None:
             markeredgecolor=INK,
             markeredgewidth=0.6,
             markersize=8,
-            label="LC4 の細胞体",
+            label=spec["legend_soma"],
         ),
         Line2D(
             [0],
@@ -393,7 +424,7 @@ def main() -> None:
             color="none",
             markerfacecolor="#c44e52",
             markersize=4,
-            label="LC4 の小葉後シナプス",
+            label=spec["legend_syn"],
         ),
     ]
     fig.legend(
@@ -417,9 +448,14 @@ def main() -> None:
         label.set_color(MUTED)
         label.set_fontsize(10)
     colorbar.outline.set_color(SPINE)
-    fig.savefig(OUT.with_suffix(".pdf"), bbox_inches="tight", pad_inches=0.25)
-    fig.savefig(OUT.with_suffix(".png"), dpi=140, bbox_inches="tight", pad_inches=0.25)
+    out = spec["out"]
+    fig.savefig(out.with_suffix(".pdf"), bbox_inches="tight", pad_inches=0.25)
+    fig.savefig(out.with_suffix(".png"), dpi=140, bbox_inches="tight", pad_inches=0.25)
     plt.close(fig)
+
+
+def main() -> None:
+    render(LC4)
 
 
 if __name__ == "__main__":

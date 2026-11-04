@@ -1,16 +1,22 @@
 """Poster figure: input, membrane, rate, and wheel time series.
 
-The traces are the same plant as fig2 and fig3. Approach is the red sphere
-on the right. Escape holds the loom current of a 30° centered disk and of a
-20° right-eye disk, both expanding at 0.4 rad/s. Solid is the left side,
-dashed the right. The dotted line is the membrane threshold. Current, rate,
-and wheels use the whole trial. The membrane row is a short stretch once
-firing has started, because a spike lasts a few milliseconds.
+The traces follow the poster equations, not the running plant. A red sphere
+on the right drives DNa02 through the spread of red pixels. Escape holds a
+30° centered disk and a 20° right-eye disk, both expanding at the same rate,
+and drives DNp01 through the spread of blue pixels. Wheels read the opposite
+side. Solid is the left side, dashed the right. The dotted line is the
+membrane threshold. Current, rate, and wheels use the whole trial. The
+membrane row is a short stretch once firing has started, because a spike
+lasts a few milliseconds.
+
+The poster leaves the sigmoid and the wheel scale as symbols. The numbers
+below are only for this picture.
 """
 
 import sys
 from pathlib import Path
 
+import cv2
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.font_manager import FontProperties
@@ -20,9 +26,9 @@ from matplotlib.ticker import MaxNLocator
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from flycar.behavior import DT, Plant, REFRAC_MS, V_THRESHOLD
-from flycar.fov import Blob, Scene, _blue_disk, camera_tangents, project_blob, simulate
-from flycar.loom import Disk, LoomTrack, cells
+from flycar.behavior import DT, FORWARD_PER_HZ, Lif, REFRAC_MS, TRACK, V_THRESHOLD
+from flycar.fov import Blob, Scene, camera_tangents, project_blob
+from flycar.loom import Disk, cells
 
 GOTHIC = FontProperties(fname="/usr/share/fonts/truetype/fonts-japanese-gothic.ttf")
 OUT = Path(__file__).with_name("fig5_series")
@@ -33,7 +39,70 @@ PAPER = "#fbfaf6"
 SPINE = "#c9c1b4"
 RED = "#b4232c"
 BLUE = "#1d5f99"
+
+# Poster symbols, fixed here so the picture can be drawn.
+SIGMA_D = 0.15
+ALPHA = 2.0
+K_S = 1.0
+M_S = 0.20
+W_S = 0.10
 EXPANSION = 0.4
+# ±1 on the wheel row is one cell firing steadily. A covered side has
+# current α = 2, which crosses threshold on the fourth millisecond and
+# then waits out the 5 ms refractory period.
+FULL_RATE = 1.0 / 0.009
+# Wheel command filter. Long enough that one spike does not reach the motor.
+TAU_V = 0.10
+# Meters per second at a plotted wheel of 1. Used only to move the camera
+# during the approach. The wheel row itself stays on the -1 to 1 scale.
+MOVE_MPS = FORWARD_PER_HZ * FULL_RATE
+WIDTH, HEIGHT = 320, 180
+HOLD = 20
+APPROACH_S = 2.4
+
+PACK = cells()
+
+
+def expansion(theta_dot: float) -> float:
+    return K_S / (1.0 + np.exp(-(theta_dot - M_S) / W_S))
+
+
+def spread(mask: np.ndarray) -> np.ndarray:
+    """a(x). A colored pixel stays at 1. An empty mask stays at 0."""
+    color = np.asarray(mask, dtype=bool)
+    if not np.any(color):
+        return np.zeros(color.shape, dtype=np.float64)
+    src = np.where(color, 0, 255).astype(np.uint8)
+    dist = cv2.distanceTransform(src, cv2.DIST_L2, 5) / color.shape[1]
+    return np.exp(-0.5 * (dist / SIGMA_D) ** 2)
+
+
+def fraction(pop, field: np.ndarray) -> np.ndarray:
+    """F on the left and the right. f_i is the mean of a over the cell's pixels."""
+    height, width = field.shape
+    ui = np.clip(np.rint(pop.u * width - 0.5).astype(np.int64), 0, width - 1)
+    vi = np.clip(np.rint(pop.v * height - 0.5).astype(np.int64), 0, height - 1)
+    ends = np.append(pop.starts[1:], len(pop.u))
+    covered = np.empty(len(pop.starts))
+    for i, (start, stop) in enumerate(zip(pop.starts, ends)):
+        pixels = np.unique(vi[start:stop] * width + ui[start:stop])
+        covered[i] = field[pixels // width, pixels % width].mean()
+    out = np.zeros(2)
+    for side in (0, 1):
+        chosen = pop.side == side
+        out[side] = float(covered[chosen] @ pop.w[chosen] / pop.side_sum[side])
+    return out
+
+
+def ellipse(cu: float, cv: float, ru: float, rv: float) -> np.ndarray:
+    mask = np.zeros((HEIGHT, WIDTH), dtype=bool)
+    if ru <= 1e-8 or rv <= 1e-8:
+        return mask
+    u = (np.arange(WIDTH) + 0.5) / WIDTH
+    v = (np.arange(HEIGHT) + 0.5) / HEIGHT
+    uu, vv = np.meshgrid(u, v)
+    mask[:] = ((uu - cu) / ru) ** 2 + ((vv - cv) / rv) ** 2 <= 1.0
+    return mask
 
 
 def disk(theta_deg: float, cu: float) -> Disk:
@@ -45,6 +114,12 @@ def disk(theta_deg: float, cu: float) -> Disk:
     return Disk(cu, 0.5, rod / tan_h / 2.0, rod / tan_v / 2.0, theta)
 
 
+def view_mask(view) -> np.ndarray:
+    if not view.inside:
+        return np.zeros((HEIGHT, WIDTH), dtype=bool)
+    return ellipse((view.nx + 1.0) / 2.0, (1.0 - view.ny) / 2.0, view.nrx / 2.0, view.nry / 2.0)
+
+
 def shown_voltage(neuron) -> float:
     """Voltage after the step. A spike is drawn at the threshold, then reset."""
     refrac = int(round(REFRAC_MS / (DT * 1000.0)))
@@ -53,72 +128,76 @@ def shown_voltage(neuron) -> float:
     return neuron.v
 
 
+def command(rate_dna: tuple[float, float], rate_dnp: tuple[float, float]) -> tuple[float, float]:
+    """Left command reads the right cells. Right command reads the left cells.
+
+    The value is the rate difference divided by one cell's steady rate,
+    so a steady command runs from -1 to 1 instead of an uncalibrated m/s.
+    """
+    u_left = (rate_dna[1] - rate_dnp[1]) / FULL_RATE
+    u_right = (rate_dna[0] - rate_dnp[0]) / FULL_RATE
+    return u_left, u_right
+
+
+def follow(speed: float, target: float) -> float:
+    """One step of the wheel low-pass."""
+    return speed + (DT / TAU_V) * (-speed + target)
+
+
 def approach():
-    """Red on the right, until the wheels have been stopped for a short while."""
-    scene = Scene(red=Blob((1.30, -0.40), 0.12), blue=None, run_s=12.0)
-    run = simulate(scene)
-    stop = next(sample.t for sample in run.samples if sample.mode == "stop")
-    kept = [sample for sample in run.samples if sample.t <= stop + 0.34]
-    t = np.array([sample.t for sample in kept])
-    current = np.array([sample.i_dna for sample in kept])
-    rate = np.array([sample.rate_dna for sample in kept])
-    left = np.array([sample.v_left for sample in kept])
-    right = np.array([sample.v_right for sample in kept])
-    t_end = float(t[-1])
-    membrane = _approach_voltage(scene, t_end)
-    return t, current, membrane, rate, left, right
+    """Right-hand red. The nose turns toward it, then both wheels go forward.
 
-
-def _approach_voltage(scene: Scene, t_end: float) -> tuple[np.ndarray, np.ndarray]:
-    """DNa02 voltage at every millisecond, on the same run as ``simulate``."""
-    n = int(round(scene.run_s / DT))
-    plant = Plant()
-    plant.x = scene.x
-    plant.y = scene.y
-    plant.heading = float((scene.heading + np.pi) % (2 * np.pi) - np.pi)
-    tan_h, tan_v = camera_tangents(scene.dfov_deg, scene.aspect)
-    track = LoomTrack()
-    volts: list[tuple[float, float]] = []
-    step_i = 0
-    for i in range(0, n, scene.hold_steps):
-        red = project_blob(scene, plant.x, plant.y, plant.heading, scene.red)
-        blue = project_blob(scene, plant.x, plant.y, plant.heading, scene.blue)
-        disk_now = _blue_disk(scene, plant.x, plant.y, plant.heading, tan_h, tan_v)
-        track.update(disk_now, i * DT)
-        for _ in range(scene.hold_steps):
-            plant.step(red.left, red.right, blue.left, blue.right, loom=track.current)
-            volts.append((shown_voltage(plant.dna_l), shown_voltage(plant.dna_r)))
-            step_i += 1
-            if step_i * DT > t_end:
-                break
-        if step_i * DT > t_end:
-            break
+    The sphere is close enough that the right eye starts above threshold and
+    the left eye starts below it. A distant speck sits on the threshold and
+    the turn dies.
+    """
+    scene = Scene(red=Blob((0.55, -0.18), 0.18), blue=None, run_s=APPROACH_S)
+    x = y = heading = 0.0
+    dna = [Lif(), Lif()]
+    v_left = v_right = 0.0
+    n = int(round(APPROACH_S / DT))
+    rows = []
+    volts = []
+    for i in range(0, n, HOLD):
+        view = project_blob(scene, x, y, heading, scene.red)
+        current = ALPHA * fraction(PACK.lplc2, spread(view_mask(view)))
+        for _ in range(HOLD):
+            dna[0].step(float(current[0]))
+            dna[1].step(float(current[1]))
+            volts.append((shown_voltage(dna[0]), shown_voltage(dna[1])))
+            u_left, u_right = command((dna[0].rate, dna[1].rate), (0.0, 0.0))
+            v_left = follow(v_left, u_left)
+            v_right = follow(v_right, u_right)
+        speed = 0.5 * (v_left + v_right) * MOVE_MPS
+        omega = (v_right - v_left) * MOVE_MPS / TRACK
+        step = DT * HOLD
+        x += speed * float(np.cos(heading)) * step
+        y += speed * float(np.sin(heading)) * step
+        heading = float((heading + omega * step + np.pi) % (2 * np.pi) - np.pi)
+        rows.append((i * DT, current[0], current[1], dna[0].rate, dna[1].rate, v_left, v_right, heading))
+    arr = np.array(rows)
     t_v = np.arange(len(volts)) * DT
-    return t_v, np.array(volts)
+    return arr[:, 0], arr[:, 1:3], (t_v, np.array(volts)), arr[:, 3:5], arr[:, 5], arr[:, 6], arr[:, 7]
 
 
 def escape(theta_deg: float, cu: float, seconds: float):
-    """Hold one loom current. Blue occupancy stays 0, as in fig3."""
-    loom = cells().current(disk(theta_deg, cu), EXPANSION)
-    plant = Plant()
+    """Hold one blue disk and one expansion. Red stays absent."""
+    spot = disk(theta_deg, cu)
+    current = ALPHA * expansion(EXPANSION) * fraction(PACK.lc4, spread(ellipse(spot.cu, spot.cv, spot.ru, spot.rv)))
+    dnp = [Lif(), Lif()]
+    v_left = v_right = 0.0
     n = int(round(seconds / DT))
     rows = []
     volts = []
     for i in range(n):
-        step = plant.step(0.0, 0.0, 0.0, 0.0, loom=loom)
-        volts.append((shown_voltage(plant.gf_l), shown_voltage(plant.gf_r)))
-        if i % 20 == 0 or i == n - 1:
-            rows.append(
-                (
-                    i * DT,
-                    loom[0],
-                    loom[1],
-                    plant.gf_l.rate,
-                    plant.gf_r.rate,
-                    step.v_left,
-                    step.v_right,
-                )
-            )
+        dnp[0].step(float(current[0]))
+        dnp[1].step(float(current[1]))
+        volts.append((shown_voltage(dnp[0]), shown_voltage(dnp[1])))
+        u_left, u_right = command((0.0, 0.0), (dnp[0].rate, dnp[1].rate))
+        v_left = follow(v_left, u_left)
+        v_right = follow(v_right, u_right)
+        if i % HOLD == HOLD - 1 or i == n - 1:
+            rows.append((i * DT, current[0], current[1], dnp[0].rate, dnp[1].rate, v_left, v_right))
     arr = np.array(rows)
     t_v = np.arange(n) * DT
     return arr[:, 0], arr[:, 1:3], (t_v, np.array(volts)), arr[:, 3:5], arr[:, 5], arr[:, 6]
@@ -181,32 +260,34 @@ def draw(ax, t, left, right, color: str) -> None:
 
 
 def main() -> None:
+    approach_run = approach()
     cases = (
-        ("赤に向かう", RED, approach()),
+        ("赤に向かう", RED, approach_run[:6]),
         ("正面の青から遠ざかる", BLUE, escape(30.0, 0.5, 1.2)),
-        ("横の青から回避する", BLUE, escape(20.0, 0.75, 0.25)),
+        ("横の青から回避する", BLUE, escape(20.0, 0.75, 0.8)),
     )
-    # Approach turns toward the right-hand red, then both wheels stop.
-    # Frontal blue reverses both wheels together. Side blue reverses the
-    # far (left) wheel harder.
-    t0, i0, membrane0, r0, vl0, vr0 = cases[0][2]
-    if not (vl0[0] > vr0[0] > 0.0 and vl0[-1] == 0.0 and vr0[-1] == 0.0):
-        raise RuntimeError("the approach series is not a right turn that stops")
-    if float(np.max(i0[:, 0])) < 1.0 or float(np.max(i0[:, 1])) < 1.0:
-        raise RuntimeError("the approach current stayed under threshold")
+    t0, i0, membrane0, _, vl0, vr0, heading0 = approach_run
+    early = t0 < 0.25
+    if not (i0[0, 1] > 1.0 > i0[0, 0]):
+        raise RuntimeError("the approach did not start on the right eye only")
+    if not (float(np.max(vl0[early])) > 0.0 and float(np.max(np.abs(vr0[early]))) < 1e-6):
+        raise RuntimeError("the approach did not pivot on the right wheel")
+    if not (vl0[-1] > 0.0 and vr0[-1] > 0.0 and abs(vl0[-1] - vr0[-1]) < 0.2 * vl0[-1]):
+        raise RuntimeError("the approach did not finish with both wheels forward")
+    if float(heading0[-1]) >= 0.0:
+        raise RuntimeError("the approach did not turn toward the right-hand red")
     if float(np.max(membrane0[1])) < 1.0:
         raise RuntimeError("the approach membrane never reached threshold")
     _, i1, membrane1, _, vl1, vr1 = cases[1][2]
-    if abs(vl1[-1] - vr1[-1]) > 1e-6 or vl1[-1] >= 0.0:
+    if abs(vl1[-1] - vr1[-1]) > 1e-4 or vl1[-1] >= 0.0:
         raise RuntimeError("the frontal series did not reverse both wheels")
     if float(np.max(membrane1[1][:, 0])) < 1.0 or float(np.max(membrane1[1][:, 1])) < 1.0:
         raise RuntimeError("the frontal membranes did not both spike")
     _, i2, membrane2, _, vl2, vr2 = cases[2][2]
-    if i2[0, 0] != 0.0 or not (vl2[-1] < vr2[-1] < 0.0):
-        raise RuntimeError("the side series did not reverse the far wheel harder")
-    if float(np.max(membrane2[1][:, 0])) > 0.0 or float(np.max(membrane2[1][:, 1])) < 1.0:
+    if i2[0, 0] >= 1.0 or i2[0, 1] <= 1.0 or not (vl2[-1] < -1e-4 and abs(vr2[-1]) < 1e-6):
+        raise RuntimeError("the side series did not reverse only the far wheel")
+    if float(np.max(membrane2[1][:, 0])) >= 1.0 or float(np.max(membrane2[1][:, 1])) < 1.0:
         raise RuntimeError("the side membrane did not spike on the near eye only")
-    del t0, r0
 
     fig, axes = plt.subplots(4, 3, figsize=(12.6, 9.6), sharex=False)
     fig.patch.set_facecolor(PAPER)
@@ -215,7 +296,8 @@ def main() -> None:
         axes[2, col].sharex(axes[0, col])
         axes[3, col].sharex(axes[0, col])
 
-    for col, (title, color, (t, current, membrane, rate, v_left, v_right)) in enumerate(cases):
+    for col, (title, color, series) in enumerate(cases):
+        t, current, membrane, rate, v_left, v_right = series
         t_v, voltage = firing_window(*membrane)
         rows = (
             (t, current),
@@ -238,7 +320,8 @@ def main() -> None:
             elif row == 3:
                 ax.axhline(0.0, color=SPINE, lw=0.6, zorder=0)
                 ax.set_xlabel("時間(s)", fontproperties=GOTHIC, fontsize=11, color=INK, labelpad=4)
-                ax.set_ylim(*padded(values, include_zero=True))
+                ax.set_ylim(-1.4, 1.4)
+                ax.set_yticks([-1.0, 0.0, 1.0])
             else:
                 ax.set_ylim(*padded(values, include_zero=True))
             if col == 0:
