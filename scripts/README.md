@@ -165,4 +165,4 @@ MaleCNS の注釈表から型 `DNa02` を取る。NeuPrint のトークンは要
 | `data/malecns/steer-dna02/type_edges.csv` | 左右の組み合わせごとのシナプス数 |
 | `data/malecns/steer-dna02/summary.json` | 細胞、落とした loom 側との交差辺、使い方 |
 
-赤は 2 本の DNa02 への外部電流にする。匂いの学習回路は切らない。車の走行則は DNa02 と DNp01 の発火率の和と差で、この表の外にある。説明は [システムの解説](../README.md#システムの解説)。DNa02 と LC4、LPLC2、DNp01 のあいだの辺は `summary.json` の `dropped_cross_with_loom` に本数だけ残し、`edges.feather` には書かない。2 つの `edges.feather` は結合しない。
+赤は 2 本の DNa02 への外部電流にする。匂いの学習回路は切らない。車の走行則はこの表の外にある。概要は [システムの解説](../README.md#システムの解説)、式の全文は [poster/poster.md](../poster/poster.md)。DNa02 と LC4、LPLC2、DNp01 のあいだの辺は `summary.json` の `dropped_cross_with_loom` に本数だけ残し、`edges.feather` には書かない。2 つの `edges.feather` は結合しない。
