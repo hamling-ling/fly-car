@@ -1,16 +1,19 @@
 """Poster figure: input, membrane, rate, and wheel time series.
 
 The traces follow the poster equations, not the running plant. A red sphere
-on the right drives DNa02 through the spread of red pixels. Escape holds a
-30° centered disk and a 20° right-eye disk, both expanding at the same rate,
-and drives DNp01 through the spread of blue pixels. Wheels read the opposite
-side. Solid is the left side, dashed the right. The dotted line is the
-membrane threshold. Current, rate, and wheels use the whole trial. The
-membrane row is a short stretch once firing has started, because a spike
-lasts a few milliseconds.
+on the right becomes a concentration on each half. That concentration
+saturates in the PN, and the bilateral cell subtracts the other side before
+the current reaches DNa02. Escape holds a 30° centered disk and a 20°
+right-eye disk, both expanding at the same rate. DNp01 adds the LC4
+expansion term to the LPLC2 size term. The size term is a Gaussian of
+angular size, and it is zero when the disk is not expanding. Wheels read
+the opposite side. Solid is the left side, dashed the right. The dotted
+line is the membrane threshold. Current, rate, and wheels use the whole
+trial. The membrane row is a short stretch once firing has started, because
+a spike lasts a few milliseconds.
 
-The poster leaves the sigmoid and the wheel scale as symbols. The numbers
-below are only for this picture.
+The poster leaves the sigmoid, the size curve, and the wheel scale as
+symbols. The numbers below are only for this picture.
 """
 
 import sys
@@ -42,15 +45,20 @@ BLUE = "#1d5f99"
 
 # Poster symbols, fixed here so the picture can be drawn.
 SIGMA_D = 0.15
-ALPHA = 2.0
+N_ORN = 1.0
+C0 = 0.05
+ALPHA = 4.0
+BETA = 0.70
 K_S = 1.0
 M_S = 0.20
 W_S = 0.10
+# g(θ) while the disk is expanding. The poster does not fix the peak.
+SIZE_PEAK_DEG = 40.0
+SIZE_SIGMA_DEG = 20.0
 EXPANSION = 0.4
-# ±1 on the wheel row is one cell firing steadily. A covered side has
-# current α = 2, which crosses threshold on the fourth millisecond and
-# then waits out the 5 ms refractory period.
-FULL_RATE = 1.0 / 0.009
+# ±1 on the wheel row is one cell firing about as fast as the refractory
+# period allows. The approach currents sit lower, so those wheels are quieter.
+FULL_RATE = 1.0 / 0.006
 # Wheel command filter. Long enough that one spike does not reach the motor.
 TAU_V = 0.10
 # Meters per second at a plotted wheel of 1. Used only to move the camera
@@ -65,6 +73,32 @@ PACK = cells()
 
 def expansion(theta_dot: float) -> float:
     return K_S / (1.0 + np.exp(-(theta_dot - M_S) / W_S))
+
+
+def size_term(theta: float, theta_dot: float) -> float:
+    """Angular-size weight. Zero when the region is not expanding."""
+    if theta_dot <= 0.0:
+        return 0.0
+    deg = float(np.rad2deg(theta))
+    return float(np.exp(-0.5 * ((deg - SIZE_PEAK_DEG) / SIZE_SIGMA_DEG) ** 2))
+
+
+def pn(concentration: np.ndarray) -> np.ndarray:
+    c = np.asarray(concentration, dtype=np.float64)
+    return N_ORN * c / (N_ORN * c + C0)
+
+
+def bilateral(concentration: np.ndarray) -> np.ndarray:
+    """DNa02 current. Each side keeps its PN and subtracts the other."""
+    u = pn(concentration)
+    return ALPHA * np.array([u[0] - BETA * u[1], u[1] - BETA * u[0]])
+
+
+def halves(field: np.ndarray) -> np.ndarray:
+    """Mean spread on the left half and the right half."""
+    width = field.shape[1]
+    mid = width // 2
+    return np.array([float(field[:, :mid].mean()), float(field[:, mid:].mean())])
 
 
 def spread(mask: np.ndarray) -> np.ndarray:
@@ -147,9 +181,9 @@ def follow(speed: float, target: float) -> float:
 def approach():
     """Right-hand red. The nose turns toward it, then both wheels go forward.
 
-    The sphere is close enough that the right eye starts above threshold and
-    the left eye starts below it. A distant speck sits on the threshold and
-    the turn dies.
+    The sphere is close enough that the right current starts above threshold
+    and the left current starts below it. Bilateral subtraction keeps the
+    weak side quiet until the red moves toward the middle.
     """
     scene = Scene(red=Blob((0.55, -0.18), 0.18), blue=None, run_s=APPROACH_S)
     x = y = heading = 0.0
@@ -160,7 +194,7 @@ def approach():
     volts = []
     for i in range(0, n, HOLD):
         view = project_blob(scene, x, y, heading, scene.red)
-        current = ALPHA * fraction(PACK.lplc2, spread(view_mask(view)))
+        current = bilateral(halves(spread(view_mask(view))))
         for _ in range(HOLD):
             dna[0].step(float(current[0]))
             dna[1].step(float(current[1]))
@@ -183,7 +217,10 @@ def approach():
 def escape(theta_deg: float, cu: float, seconds: float):
     """Hold one blue disk and one expansion. Red stays absent."""
     spot = disk(theta_deg, cu)
-    current = ALPHA * expansion(EXPANSION) * fraction(PACK.lc4, spread(ellipse(spot.cu, spot.cv, spot.ru, spot.rv)))
+    field = spread(ellipse(spot.cu, spot.cv, spot.ru, spot.rv))
+    weight = expansion(EXPANSION) * fraction(PACK.lc4, field)
+    weight = weight + size_term(spot.theta, EXPANSION) * fraction(PACK.lplc2, field)
+    current = ALPHA * weight
     dnp = [Lif(), Lif()]
     v_left = v_right = 0.0
     n = int(round(seconds / DT))

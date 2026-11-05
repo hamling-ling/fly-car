@@ -1,7 +1,9 @@
 """Poster figure: the motion model from camera to wheels.
 
-The camera and the motors are the physical layers. Everything between them
-is the model: pixel to current, the four cells, and firing rate to wheel speed.
+The camera and the motors are the physical layers. Red halves become ORN
+and PN concentrations, and the ipsilateral PN minus the contralateral PN
+is the DNa02 current. LC4 carries expansion, and LPLC2 carries angular
+size, into the ipsilateral DNp01 current. Each wheel reads the opposite side. No numbers.
 """
 
 from pathlib import Path
@@ -83,26 +85,26 @@ def main() -> None:
 
     box(ax, 0.35, 1.85, 2.15, 3.7, PHYSICAL, LINE, lw=1.8)
     text(ax, 1.42, 6.15, "物理", 15, MUTED)
-    text(ax, 1.42, 4.55, "カメラ", 20, weight="medium")
-    text(ax, 1.42, 3.85, "赤と青の画素", 13)
-    text(ax, 1.42, 2.55, "0.10 秒ごと", 12, MUTED)
+    text(ax, 1.42, 4.15, "カメラ", 20, weight="medium")
+    text(ax, 1.42, 3.35, "赤と青の画素", 13)
 
     box(ax, 13.85, 1.85, 2.15, 3.7, PHYSICAL, LINE, lw=1.8)
     text(ax, 14.92, 6.15, "物理", 15, MUTED)
-    text(ax, 14.92, 4.55, "モーター", 20, weight="medium")
-    text(ax, 14.92, 3.85, "左輪と右輪", 13)
-    text(ax, 14.92, 2.55, "0.02 秒ごと", 12, MUTED)
+    text(ax, 14.92, 4.15, "モーター", 20, weight="medium")
+    text(ax, 14.92, 3.35, "左輪と右輪", 13)
 
     # Two lanes: approach on top, escape below.
     box(ax, 3.85, 4.05, 2.7, 1.85, WHITE, RED, lw=1.8)
-    text(ax, 5.2, 5.45, "接近の電流", 15, RED, weight="medium")
-    text(ax, 5.2, 4.85, "左右の占有", 13)
-    text(ax, 5.2, 4.4, r"$I = \tilde{c}\,/\,c_{\mathrm{ref}}$", 14)
+    text(ax, 5.2, 5.52, "接近の電流", 15, RED, weight="medium")
+    text(ax, 5.2, 4.98, "左右の濃度を ORN へ", 12)
+    text(ax, 5.2, 4.58, "同側の PN から", 12)
+    text(ax, 5.2, 4.22, "反対側の PN を引く", 12)
 
     box(ax, 3.85, 1.55, 2.7, 1.85, WHITE, BLUE, lw=1.8)
-    text(ax, 5.2, 2.95, "逃避の電流", 15, BLUE, weight="medium")
-    text(ax, 5.2, 2.35, r"視角 $\theta$ と拡大 $\dot\theta$", 13)
-    text(ax, 5.2, 1.9, "LC4 と LPLC2 の重み", 12, MUTED)
+    text(ax, 5.2, 3.02, "逃避の電流", 15, BLUE, weight="medium")
+    text(ax, 5.2, 2.48, "LC4 は拡大", 12)
+    text(ax, 5.2, 2.08, "LPLC2 は視角の大きさ", 12)
+    text(ax, 5.2, 1.72, "同側の DNp01 へ", 12)
 
     box(ax, 7.35, 4.05, 2.35, 1.85, WHITE, RED, lw=1.8)
     text(ax, 8.52, 5.4, "DNa02", 18, weight="medium")
@@ -115,12 +117,11 @@ def main() -> None:
     text(ax, 8.52, 1.9, "逃避", 13, BLUE)
 
     box(ax, 10.4, 1.55, 2.05, 4.35, WHITE, LINE, lw=1.8)
-    text(ax, 11.42, 5.4, "車輪速度", 15, weight="medium")
-    text(ax, 11.42, 4.75, "赤の和は前進", 13)
-    text(ax, 11.42, 4.25, "青の和は後退", 13)
-    text(ax, 11.42, 3.7, "赤の差は旋回", 13)
-    text(ax, 11.42, 3.15, "青の差は反対の\n輪を後退", 12.5)
-    text(ax, 11.42, 2.15, "赤が左右を\n埋めたら停止", 12, MUTED)
+    text(ax, 11.42, 5.35, "車輪速度", 15, weight="medium")
+    text(ax, 11.42, 4.45, "左輪は右の細胞", 13)
+    text(ax, 11.42, 3.85, "右輪は左の細胞", 13)
+    text(ax, 11.42, 3.15, "赤の発火は前へ", 13)
+    text(ax, 11.42, 2.45, "青の発火は後へ", 13)
 
     arrow(ax, 2.5, 3.85, 4.95, RED)
     arrow(ax, 2.5, 3.85, 2.5, BLUE)
@@ -139,8 +140,6 @@ def main() -> None:
 
     arrow(ax, 12.45, 13.85, 3.7, LINE)
     text(ax, 13.15, 4.05, "左右の速度", 11, INK)
-
-    text(ax, 8.12, 1.15, "膜は 1 ms。発火率は 50 ms で平滑する。", 12, MUTED)
 
     text(
         ax,
