@@ -73,21 +73,25 @@ $$
 
 ### 逃避の電流
 
-逃避は、一番大きい青の領域の視角 $\theta$ と、その拡大 $\dot\theta=d\theta/dt$ を電流にする。 $\theta$ は、青の領域がカメラの対角の中で占める角度である。計算は付録に置く。DNp01 の電流は、LC4 の拡大と LPLC2 の大きさの和である。
+近づいてくる対象から離れる処理を表す。対象が近づくと、その像の視角は広がり、拡大速度を持つ。LC4 は拡大速度を、LPLC2 は視角の大きさを符号化し、巨大線維では両者が足される（Ache et al., 2019）。LPLC2 は、中心から外へ向かう動きに選択的で、収縮にはほとんど応答しない（Klapoetke et al., 2017）。このモデルでは、その和を同側の DNp01 の電流にする。重みは、同側の DNp01 への化学シナプス数である（Berg et al., 2026）。この節では、青の画素からその電流までの流れを数式化する。
 
-$s(\dot\theta)$ は拡大の強さで、LC4 の項に掛ける。 $m$ はシグモイドの中心、 $w$ はその幅である。指数に掛かる $1/w$ がゲインである。 $k_s$ は調節用の係数である。 $g(\theta)$ は視角の大きさで、LPLC2 の項に掛ける。視角が広がっているときだけ正で、止まっているときと遠ざかっているときは 0 である。
+LC4 と LPLC2 に入る量は、一番大きい青の領域の視角 $\theta$ とその拡大 $\dot\theta$ である。 $\theta$ は、青の領域がカメラの対角の中で占める角度である。 $\dot\theta=d\theta/dt$ である。計算は付録の式 (18) から式 (21) に置く。
+
+LC4 に掛ける拡大の強さ $s(\dot\theta)$ は、拡大速度が中心を超えると立ち上がるスイッチである。止まった対象や、ごく遅い拡大は、小さいままにする。 $m$ はシグモイドの中心、 $w$ はその幅である。指数に掛かる $1/w$ がゲインである。 $k_s$ は調節用の係数である。この強さは式 (6) で表される。
 
 $$
 s(\dot\theta)=k_s \frac{1}{1+\exp\left(-\dfrac{1}{w}(\dot\theta-m)\right)}
 \tag{6}
 $$
 
-青では、 $d(x)$ を一番近い青の画素までの距離とし、 $a(x)$ を刺激の値にする。細胞 $i$ が見ている画素の集合を $X_i$ とする。 $|X_i|$ はその画素数である。 $f_i$ は、その集合での $a(x)$ の平均である。 $w_i$ は、その細胞から同側の DNp01 への化学シナプス数である（Berg et al., 2026）。LC4 と LPLC2 で、それぞれの $w_i$ を使う。 $`W^{\mathrm{LC4}}_{\mathrm{side}}`$ と $`W^{\mathrm{LPLC2}}_{\mathrm{side}}`$ は、その種類の、その側の $w_i$ の和である。和は、その種類の細胞について取る。右半分の左端が青なら、左半分の右端でも $a(x)$ は正になり、左の LC4 と左の LPLC2 が刺激される。
+各細胞の刺激 $f_i$ は、その細胞が見ている範囲での青の広がりの平均である。青も、画素の広がりの $a(x)$ を使う。細胞 $i$ が見ている画素の集合を $X_i$ とする。 $|X_i|$ はその画素数である。この平均がないと、次のシナプスの重みを掛ける入力がない。 $f_i$ は式 (7) で表される。式 (7) では、右半分の左端が青なら、左半分の右端でも $a(x)$ は正になり、左の細胞も刺激される。
 
 $$
 f_i=\frac{\sum_{x \in X_i} a(x)}{|X_i|}
 \tag{7}
 $$
+
+LC4 から同側の DNp01 への寄与 $F^{\mathrm{LC4}}_{L,R}$ は、シナプス数で重み付けした刺激の平均である。接続の多い細胞ほど、電流への寄与が大きい。 $w_i$ は、その細胞から同側の DNp01 への化学シナプス数である（Berg et al., 2026）。 $`W^{\mathrm{LC4}}_{\mathrm{side}}`$ は、その側の LC4 についての $w_i$ の和である。側ごとの和で割ると、画面を覆ったときの値がシナプスの総数によらない。 $F^{\mathrm{LC4}}_{L,R}$ は式 (8) で表される。
 
 $$
 F^{\mathrm{LC4}}_{L,R}
@@ -95,18 +99,22 @@ F^{\mathrm{LC4}}_{L,R}
 \tag{8}
 $$
 
+LPLC2 から同側の DNp01 への寄与 $F^{\mathrm{LPLC2}}_{L,R}$ は、同じ平均を LPLC2 自身のシナプス数で重み付けしたものである。大きさの項は、LPLC2 の接続だけで決まる。 $`W^{\mathrm{LPLC2}}_{\mathrm{side}}`$ は、その側の LPLC2 についての $w_i$ の和である。 $F^{\mathrm{LPLC2}}_{L,R}$ は式 (9) で表される。
+
 $$
 F^{\mathrm{LPLC2}}_{L,R}
 =\frac{\sum_i w_i f_i}{W^{\mathrm{LPLC2}}_{\mathrm{side}}}
 \tag{9}
 $$
 
-LC4 の発火率は、その細胞が見ている範囲での青の広がりの平均に、拡大の強さを掛けたものである。LPLC2 の発火率は、その細胞が見ている範囲での青の広がりの平均に、視角の大きさを掛けたものである。平均も強さも 1 のとき、発火率は最大値 $r_{\max}$ になる。膜の閾値は 1 である。平均が 1 で、発火率が $r_{\mathrm{ref}}$ のとき、その項の電流は 1 になる。この変換の係数は $r_{\max}/r_{\mathrm{ref}}$ で、式 (10) の $\alpha$ がこれである。
+発火率を電流の大きさに合わせる係数 $\alpha$ は、$r_{\max}/r_{\mathrm{ref}}$ である。LC4 の発火率は、見ている範囲の平均に拡大の強さを掛けたものである。LPLC2 の発火率は、見ている範囲の平均に視角の大きさを掛けたものである。平均も強さも 1 のとき、発火率は最大値 $r_{\max}$ になる。膜の閾値は 1 である。平均が 1 で、発火率が $r_{\mathrm{ref}}$ のとき、その項の電流は 1 になる。この係数は式 (10) である。
 
 $$
 \alpha = \frac{r_{\max}}{r_{\mathrm{ref}}}
 \tag{10}
 $$
+
+同側の DNp01 の電流 $I^{\mathrm{DNp01}}_{L,R}$ は、LC4 の拡大の項と LPLC2 の大きさの項の和に、$\alpha$ を掛けたものである。 $g(\theta)$ は視角の大きさで、LPLC2 の項に掛ける。視角が広がっているときだけ正で、止まっているときと遠ざかっているときは 0 である。左右は、それぞれ同側の和だけを受ける。この電流は式 (11) で表される。
 
 $$
 I^{\mathrm{DNp01}}_{L,R}
@@ -114,16 +122,18 @@ I^{\mathrm{DNp01}}_{L,R}
 \tag{11}
 $$
 
-### 膜
+### 膜電位と発火率
 
-膜は四本とも同じ積分発火である。 $V$ は膜電位で、閾値は 1 とする。 $V \ge 1$ でスパイクし、 $V$ を 0 に戻す。 $\tau_{\mathrm{ref}}$ は不応期で、そのあいだは $V$ を 0 のままにする。 $s_{\mathrm{spk}}$ はスパイクの有無で、スパイクした刻みだけ 1、それ以外は 0 である。 $\Delta t$ は刻み幅、 $\tau$ は膜の時定数、 $I$ はその膜の電流である。
+四本の膜電位は、同じ漏れのある積分発火（leaky integrate-and-fire）で求める（Stein, 1965）。電流は漏れながら積もり、閾値に達するとスパイクして戻る。戻したあとは不応期に入る。スパイクの頻度が発火率になる。この節では、その膜電位と発火率を数式化する。
+
+膜電位 $V$ は、自分の電流 $I$ へ時定数 $\tau$ で近づく。漏れがあるので、電流が止まれば膜電位は 0 へ戻る。 $\Delta t$ は刻み幅である。閾値は 1 とする。 $V \ge 1$ でスパイクし、 $V$ を 0 に戻す。 $\tau_{\mathrm{ref}}$ は不応期で、そのあいだは $V$ を 0 のままにする。式 (12) は、閾値未満で不応期の外にあるときの更新である。
 
 $$
 V \leftarrow V + \frac{\Delta t}{\tau}(-V + I)
 \tag{12}
 $$
 
-$r$ は発火率、 $\tau_r$ はその時定数である。
+発火率 $r$ は、スパイクを時定数 $\tau_r$ でならしたものである。ならすことで、車輪への指令はスパイクの一つ一つではなく、その頻度になる。 $s_{\mathrm{spk}}$ はスパイクの有無で、スパイクした刻みだけ 1、それ以外は 0 である。スパイクした刻みでは $s_{\mathrm{spk}}/\Delta t$ が、その刻みの発火率になる。 $r$ は式 (13) で表される。
 
 $$
 r \leftarrow r + \frac{\Delta t}{\tau_r}\left(-r + \frac{s_{\mathrm{spk}}}{\Delta t}\right)
@@ -132,19 +142,23 @@ $$
 
 ### 車輪
 
-四本の発火率は、反対側の車輪への指令になる。左の指令は右の DNa02 と右の DNp01 を見、右の指令は左の二つを見る。赤の発火率は車輪を前へ動かし、青の発火率は車輪を後へ動かす。 $u_L$ と $u_R$ は左右の指令である。 $k$ は、発火率の差を指令にする係数である。赤と青は、この同じ $k$ で入る。
+四本の発火率は、反対側の車輪への指令になる。左の車輪は右の DNa02 と右の DNp01 を使い、右の車輪は左の二つを使う。反対側を使うことで、赤では頭が赤の方を向き、青では頭が青から逸れる。赤の発火率は車輪を前へ動かし、青の発火率は車輪を後へ動かす。
+
+左の指令 $u_L$ は、右の赤の発火率から右の青の発火率を引いたものである。 $k$ は、その差を指令にする係数である。赤と青は、この同じ $k$ で入る。 $u_L$ は式 (14) で表される。
 
 $$
 u_L = k\left(r^{\mathrm{DNa02}}_R - r^{\mathrm{DNp01}}_R\right)
 \tag{14}
 $$
 
+右の指令 $u_R$ は、左右を入れ替えた同じ差である。見る細胞は左の DNa02 と左の DNp01 である。 $k$ は左と同じである。 $u_R$ は式 (15) で表される。
+
 $$
 u_R = k\left(r^{\mathrm{DNa02}}_L - r^{\mathrm{DNp01}}_L\right)
 \tag{15}
 $$
 
-$\tau_v$ は指令をならす時定数である。 $v_L$ と $v_R$ は、ならしたあとの左右の車輪速度である。 $\Delta t$ は膜の刻み幅である。
+左右の車輪速度は、指令を時定数 $\tau_v$ でならしたものである。ならすことで、発火率に残る細かい凹凸は速度に出ない。 $v_L$ と $v_R$ は、ならしたあとの左右の車輪速度である。 $\Delta t$ は式 (12) の刻み幅である。左の速度は式 (16)、右の速度は式 (17) で表される。
 
 $$
 v_L \leftarrow v_L + \frac{\Delta t}{\tau_v}(-v_L + u_L)
@@ -156,9 +170,9 @@ v_R \leftarrow v_R + \frac{\Delta t}{\tau_v}(-v_R + u_R)
 \tag{17}
 $$
 
-片側だけが赤のとき、赤い側の DNa02 が残り、赤い側の車輪は止まり、反対の車輪が前へ出る。鼻は赤のほうを向く。止まった車輪を中心に回るので、旋回半径は左右の車輪の間隔の半分である。正面に近い赤ほど左右の PN の差は小さく、その車輪の速さも小さい。左右の PN が等しいとき、各側の電流は、その PN の $\alpha(1-\beta)$ 倍である。 $\beta = 1$ では両方の電流が 0 になり、車輪は止まる。 $\beta < 1$ では、両輪が同じ速さで前へ出る。
+片側の赤では、頭が赤のほうを向く。赤い側の DNa02 が残り、赤い側の車輪は止まり、反対の車輪が前へ出る。止まった車輪を中心に回るので、旋回半径は左右の車輪の間隔の半分である。正面に近い赤ほど左右の PN の差は小さく、その車輪の速さも小さい。左右の PN が等しいとき、各側の電流は、その PN の $\alpha(1-\beta)$ 倍である。 $\beta = 1$ では両方の電流が 0 になり、車輪は止まる。 $\beta < 1$ では、両輪が同じ速さで前へ出る。
 
-片側だけが青のとき、青と反対の車輪が後へ出て、青い側の車輪は止まる。鼻は青と反対を向く。進行は後ろなので、車体は青のある側へ下がる。左右の青がそろって発火すると、両輪が同じ速さで後へ出て、車体はまっすぐ下がる。
+片側の青では、頭が青と反対を向く。青と反対の車輪が後へ出て、青い側の車輪は止まる。進行は後ろなので、車体は青のある側へ下がる。左右の青がそろって発火すると、両輪が同じ速さで後へ出て、車体はまっすぐ下がる。
 
 ## 数値計算
 
@@ -218,6 +232,8 @@ $$
 
 ## 文献
 
+Ache, J. M., Polsky, J., Alghailani, S., et al. (2019). Neural basis for looming size and velocity encoding in the Drosophila giant fiber escape pathway. Current Biology, 29(6), 1073–1081.e4. https://doi.org/10.1016/j.cub.2019.01.079
+
 Berg, S., Beckett, I. R., Costa, M., et al. (2026). Sexual dimorphism in the complete Drosophila male central nervous system connectome. Cell, 189(18), 5504–5526.e15. https://doi.org/10.1016/j.cell.2026.08.015
 
 Bhandawat, V., Olsen, S. R., Gouwens, N. W., Schlief, M. L., and Wilson, R. I. (2007). Sensory processing in the Drosophila antennal lobe increases reliability and separability of ensemble odor representations. Nature Neuroscience, 10(11), 1474–1482. https://doi.org/10.1038/nn1976
@@ -228,6 +244,10 @@ Heisenberg, M. and Wolf, R. (1984). Vision in Drosophila: Genetics of Microbehav
 
 Kemppainen, J., Scales, B., Razban Haghighi, K., et al. (2022). Binocular mirror-symmetric microsaccadic sampling enables Drosophila hyperacute 3D vision. Proceedings of the National Academy of Sciences, 119(12), e2109717119. https://doi.org/10.1073/pnas.2109717119
 
+Klapoetke, N. C., Nern, A., Peek, M. Y., et al. (2017). Ultra-selective looming detection from radial motion opponency. Nature, 551(7679), 237–241. https://doi.org/10.1038/nature24626
+
 Olsen, S. R. and Wilson, R. I. (2008). Lateral presynaptic inhibition mediates gain control in an olfactory circuit. Nature, 452(7190), 956–960. https://doi.org/10.1038/nature06864
+
+Stein, R. B. (1965). A theoretical analysis of neuronal variability. Biophysical Journal, 5(2), 173–194. https://doi.org/10.1016/S0006-3495(65)86709-1
 
 Vosshall, L. B., Wong, A. M., and Axel, R. (2000). An olfactory sensory map in the fly brain. Cell, 102(2), 147–159. https://doi.org/10.1016/S0092-8674(00)00021-0
