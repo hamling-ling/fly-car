@@ -1,7 +1,7 @@
-"""Poster figure: LPLC2 somas, lobula-plate postsynapses, and the camera plane.
+"""LPLC2 now shares poster/fig7_lobula with LC4.
 
-The layout matches fig7. LPLC2 junctions sit on lobula-plate squares (a, b),
-with the same orientation as LC4: larger a is more lateral, smaller b is up.
+Both rear views are drawn by draw_fig7.render_pair. This entry point writes
+that same sheet, so an older fig8 command still refreshes the combined figure.
 """
 
 import sys
@@ -13,7 +13,7 @@ import draw_fig7
 
 
 def main() -> None:
-    draw_fig7.render(draw_fig7.LPLC2)
+    draw_fig7.render_pair()
 
 
 if __name__ == "__main__":

@@ -1,14 +1,10 @@
-"""Poster figure: LC4 somas, lobula postsynapses, and the camera plane.
+"""Poster figure: LC4 and LPLC2, both seen from behind, on one sheet.
 
-The left column stacks three views of the same brain. Gray points are a
-thinned set of other cell bodies. Large points are LC4 somas. Small points
-are LC4 postsynapses in the lobula. Color is the image left-right coordinate
-of the column the postsynapse sits in. The right panel drops a line from
-each cell's mean postsynapse position onto a camera plane placed in front
-of the lobula. The landing point is the mean of columns a and b.
-
-Positions and the subsampling match research/notebooks/lc4_camera_map.ipynb.
-The plane is shifted toward the viewer so the lines can be seen.
+Gray points are a thinned set of other cell bodies. Large points are the
+cell's somas. Small points are its postsynapses. Color is the image
+left-right coordinate of the column the postsynapse sits in. LC4 junctions
+are in the lobula. LPLC2 junctions are in the lobula plate. The screen
+mapping lives in draw_fig7_overlap.py.
 """
 
 import sys
@@ -40,10 +36,9 @@ BG_N = 25_000
 SYN_N = 12_000
 
 # Native MaleCNS axes: +x is the fly's left, +y is ventral, +z is posterior.
-# Each panel is the view from the positive missing axis. On x-y the page
-# top is ventral, marked with an upward arrow and 下. The view from the
-# fly's left has a rightward arrow and 下.
-# Where z points up, anterior is down the page.
+# The rear view is the x-y plane from +z, turned 180° on the page so dorsal
+# is up and the fly's right eye is on the right. A downward arrow marks
+# ventral. The other views stay from the positive missing axis.
 VIEWS = (
     (0, 1, "x", "y", "後ろから", False),
     (0, 2, "x", "z", "上から", True),
@@ -164,6 +159,9 @@ def draw_views(axes, soma, bg, cell_soma, cell_u, syn, syn_u, norm, title: str) 
         )
         ax.set_xlim(*xlim)
         ax.set_ylim(*ylim)
+        if view == "後ろから":
+            ax.invert_xaxis()
+            ax.invert_yaxis()
         ax.set_xlabel(f"{xl} (μm)", fontsize=10, labelpad=2)
         ax.set_ylabel(f"{yl} (μm)", fontsize=10, labelpad=2)
         style_view(ax)
@@ -204,15 +202,15 @@ def draw_views(axes, soma, bg, cell_soma, cell_u, syn, syn_u, norm, title: str) 
         else:
             ax.annotate(
                 "",
-                xy=(0.08, 0.94),
-                xytext=(0.08, 0.74),
+                xy=(0.08, 0.08),
+                xytext=(0.08, 0.28),
                 xycoords=ax.transAxes,
                 arrowprops={"arrowstyle": "-|>", "color": INK, "lw": 1.1, "mutation_scale": 9},
                 zorder=5,
             )
             ax.text(
                 0.11,
-                0.84,
+                0.18,
                 "下",
                 transform=ax.transAxes,
                 ha="left",
@@ -380,63 +378,63 @@ LPLC2 = {
 }
 
 
-def render(spec: dict) -> None:
-    soma, bg, cell_soma, cell_u, cell_v, cell_xyz, syn_all, syn, syn_u = load(spec)
+def render_pair() -> None:
+    """LC4 and LPLC2, both from behind, on one sheet."""
     norm = Normalize(vmin=0.0, vmax=1.0)
-    # Display widths follow each view's micrometre span, so equal aspect
-    # fills the row. x is the wide axis, z the tall one.
-    fig = plt.figure(figsize=(12.6, 9.4))
+    fig = plt.figure(figsize=(14.4, 6.1))
     fig.patch.set_facecolor(PAPER)
     grid = fig.add_gridspec(
-        2,
         1,
-        height_ratios=(1.0, 1.35),
-        hspace=0.22,
-        top=0.93,
-        bottom=0.07,
-        left=0.06,
-        right=0.98,
+        3,
+        width_ratios=(1.0, 1.0, 0.035),
+        wspace=0.22,
+        left=0.04,
+        right=0.97,
+        top=0.84,
+        bottom=0.10,
     )
-    top = grid[0].subgridspec(1, 4, width_ratios=(1.42, 0.73, 0.52, 0.06), wspace=0.38)
-    views = [fig.add_subplot(top[0, index]) for index in range(3)]
-    scale = fig.add_subplot(top[0, 3])
-    plane = fig.add_subplot(grid[1], projection="3d")
-    draw_views(views, soma, bg, cell_soma, cell_u, syn, syn_u, norm, spec["title"])
-    draw_plane(plane, cell_xyz, cell_u, cell_v, syn_all, norm)
-
     legend = [
         Line2D([0], [0], marker="o", color="none", markerfacecolor="0.78", markersize=5, label="脳の外形"),
-        Line2D(
-            [0],
-            [0],
-            marker="o",
-            color="none",
-            markerfacecolor="#4c72b0",
-            markeredgecolor=INK,
-            markeredgewidth=0.6,
-            markersize=8,
-            label=spec["legend_soma"],
-        ),
-        Line2D(
-            [0],
-            [0],
-            marker="o",
-            color="none",
-            markerfacecolor="#c44e52",
-            markersize=4,
-            label=spec["legend_syn"],
-        ),
     ]
+    for column, spec in enumerate((LC4, LPLC2)):
+        soma, bg, cell_soma, cell_u, _v, _xyz, _all, syn, syn_u = load(spec)
+        view = fig.add_subplot(grid[0, column])
+        draw_views([view], soma, bg, cell_soma, cell_u, syn, syn_u, norm, spec["title"])
+        legend.append(
+            Line2D(
+                [0],
+                [0],
+                marker="o",
+                color="none",
+                markerfacecolor="#4c72b0",
+                markeredgecolor=INK,
+                markeredgewidth=0.6,
+                markersize=8,
+                label=spec["legend_soma"],
+            )
+        )
+        legend.append(
+            Line2D(
+                [0],
+                [0],
+                marker="o",
+                color="none",
+                markerfacecolor="#c44e52",
+                markersize=4,
+                label=spec["legend_syn"],
+            )
+        )
     fig.legend(
         handles=legend,
-        loc="upper left",
-        bbox_to_anchor=(0.06, 0.995),
+        loc="upper center",
+        bbox_to_anchor=(0.48, 0.98),
         frameon=False,
         prop=GOTHIC,
         fontsize=11,
         labelcolor=INK,
-        ncol=3,
+        ncol=5,
     )
+    scale = fig.add_subplot(grid[0, 2])
     colorbar = fig.colorbar(
         ScalarMappable(norm=norm, cmap="coolwarm"),
         cax=scale,
@@ -448,14 +446,13 @@ def render(spec: dict) -> None:
         label.set_color(MUTED)
         label.set_fontsize(10)
     colorbar.outline.set_color(SPINE)
-    out = spec["out"]
-    fig.savefig(out.with_suffix(".pdf"), bbox_inches="tight", pad_inches=0.25)
-    fig.savefig(out.with_suffix(".png"), dpi=140, bbox_inches="tight", pad_inches=0.25)
+    fig.savefig(OUT.with_suffix(".pdf"), bbox_inches="tight", pad_inches=0.25)
+    fig.savefig(OUT.with_suffix(".png"), dpi=140, bbox_inches="tight", pad_inches=0.25)
     plt.close(fig)
 
 
 def main() -> None:
-    render(LC4)
+    render_pair()
 
 
 if __name__ == "__main__":
