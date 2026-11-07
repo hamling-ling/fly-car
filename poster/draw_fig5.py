@@ -16,6 +16,10 @@ milliseconds.
 
 The poster leaves the sigmoid, the size curve, and the wheel scale as
 symbols. The numbers below are only for this picture.
+
+Each case is one figure: the path on the left, and current, membrane,
+firing rate, and wheels on the right. The paths are the existing
+schematics. The traces are these equations.
 """
 
 import sys
@@ -34,8 +38,13 @@ from flycar.behavior import DT, FORWARD_PER_HZ, Lif, REFRAC_MS, TRACK, V_THRESHO
 from flycar.fov import Blob, Scene, camera_tangents, project_blob
 from flycar.loom import Disk, cells
 
+from draw_fig2 import draw_approach
+from draw_fig3 import draw_front, draw_side, prepare
+
 GOTHIC = FontProperties(fname="/usr/share/fonts/truetype/fonts-japanese-gothic.ttf")
-OUT = Path(__file__).with_name("fig5_series")
+OUT_APPROACH = Path(__file__).with_name("fig_approach")
+OUT_RETREAT = Path(__file__).with_name("fig_retreat")
+OUT_AVOID = Path(__file__).with_name("fig_avoid")
 
 INK = "#1c1915"
 MUTED = "#5e584f"
@@ -308,13 +317,86 @@ def draw(ax, t, left, right, color: str) -> None:
     style(ax)
 
 
+def save_case(title: str, color: str, series, draw_left, out: Path) -> None:
+    """One case. The path fills the left. Four traces stack on the right."""
+    fig = plt.figure(figsize=(12.8, 8.2))
+    fig.patch.set_facecolor(PAPER)
+    grid = fig.add_gridspec(
+        4,
+        2,
+        width_ratios=(1.12, 1.0),
+        wspace=0.34,
+        hspace=0.46,
+        left=0.055,
+        right=0.985,
+        top=0.90,
+        bottom=0.07,
+    )
+    left = fig.add_subplot(grid[:, 0])
+    draw_left(left)
+    left.set_title(title, fontproperties=GOTHIC, fontsize=16, color=INK, pad=12)
+    current_ax = fig.add_subplot(grid[0, 1])
+    membrane_ax = fig.add_subplot(grid[1, 1])
+    rate_ax = fig.add_subplot(grid[2, 1], sharex=current_ax)
+    wheel_ax = fig.add_subplot(grid[3, 1], sharex=current_ax)
+
+    t, current, membrane, rate, v_left, v_right = series
+    t_v, voltage = firing_window(*membrane)
+    rows = (
+        (current_ax, t, current),
+        (membrane_ax, t_v, voltage),
+        (rate_ax, t, rate),
+        (wheel_ax, t, np.column_stack((v_left, v_right))),
+    )
+    row_name = ("電流", "膜電位", "発火率", "車輪")
+    for row, (ax, time, values) in enumerate(rows):
+        draw(ax, time, values[:, 0], values[:, 1], color)
+        ax.set_ylabel(row_name[row], fontproperties=GOTHIC, fontsize=11, color=INK, labelpad=6)
+        if row == 0:
+            ax.axhline(1.0, color=MUTED, lw=0.8, ls=(0, (2, 2)), zorder=0)
+            ax.set_ylim(*padded(np.vstack([values, [[1.0, 1.0]]]), include_zero=True))
+            ax.tick_params(labelbottom=False)
+        elif row == 1:
+            ax.axhline(1.0, color=MUTED, lw=0.8, ls=(0, (2, 2)), zorder=0)
+            ax.set_ylim(*padded(np.vstack([values, [[0.0, 0.0], [1.0, 1.0]]]), include_zero=True))
+            ax.set_yticks([0.0, 0.5, 1.0])
+            ax.set_xlabel("時間(拡大)", fontproperties=GOTHIC, fontsize=11, color=INK, labelpad=2)
+        elif row == 2:
+            ax.set_ylim(*padded(values, include_zero=True))
+            ax.tick_params(labelbottom=False)
+        else:
+            ax.axhline(0.0, color=SPINE, lw=0.6, zorder=0)
+            ax.set_xlabel("時間(s)", fontproperties=GOTHIC, fontsize=11, color=INK, labelpad=2)
+            ax.set_ylim(-1.4, 1.4)
+            ax.set_yticks([-1.0, 0.0, 1.0])
+
+    legend = [
+        Line2D([0], [0], color=INK, lw=1.6, label="左"),
+        Line2D([0], [0], color=INK, lw=1.6, ls=(0, (4, 2.2)), label="右"),
+        Line2D([0], [0], color=MUTED, lw=0.8, ls=(0, (2, 2)), label="閾値"),
+    ]
+    current_ax.legend(
+        handles=legend,
+        loc="lower center",
+        bbox_to_anchor=(0.5, 1.08),
+        ncol=3,
+        frameon=False,
+        prop=GOTHIC,
+        fontsize=11,
+        labelcolor=INK,
+        borderaxespad=0.0,
+        columnspacing=1.1,
+        handlelength=2.4,
+    )
+    fig.savefig(out.with_suffix(".pdf"), bbox_inches="tight", pad_inches=0.18)
+    fig.savefig(out.with_suffix(".png"), dpi=160, bbox_inches="tight", pad_inches=0.18)
+    plt.close(fig)
+
+
 def main() -> None:
     approach_run = approach()
-    cases = (
-        ("赤に向かう", RED, approach_run[:6]),
-        ("正面の青から遠ざかる", BLUE, escape(30.0, 0.5, 1.2)),
-        ("横の青から回避する", BLUE, escape(20.0, 0.75, 0.8)),
-    )
+    retreat = escape(30.0, 0.5, 1.2)
+    avoid = escape(20.0, 0.75, 0.8)
     t0, i0, membrane0, _, vl0, vr0, heading0 = approach_run
     early = t0 < 0.25
     if not (i0[0, 1] > 1.0 > i0[0, 0]):
@@ -327,74 +409,21 @@ def main() -> None:
         raise RuntimeError("the approach did not turn toward the right-hand red")
     if float(np.max(membrane0[1])) < 1.0:
         raise RuntimeError("the approach membrane never reached threshold")
-    _, i1, membrane1, _, vl1, vr1 = cases[1][2]
+    _, i1, membrane1, _, vl1, vr1 = retreat
     if abs(vl1[-1] - vr1[-1]) > 1e-4 or vl1[-1] >= 0.0:
         raise RuntimeError("the frontal series did not reverse both wheels")
     if float(np.max(membrane1[1][:, 0])) < 1.0 or float(np.max(membrane1[1][:, 1])) < 1.0:
         raise RuntimeError("the frontal membranes did not both spike")
-    _, i2, membrane2, _, vl2, vr2 = cases[2][2]
+    _, i2, membrane2, _, vl2, vr2 = avoid
     if i2[0, 0] >= 1.0 or i2[0, 1] <= 1.0 or not (vl2[-1] < -1e-4 and abs(vr2[-1]) < 1e-6):
         raise RuntimeError("the side series did not reverse only the far wheel")
     if float(np.max(membrane2[1][:, 0])) >= 1.0 or float(np.max(membrane2[1][:, 1])) < 1.0:
         raise RuntimeError("the side membrane did not spike on the near eye only")
 
-    fig, axes = plt.subplots(4, 3, figsize=(12.6, 9.6), sharex=False)
-    fig.patch.set_facecolor(PAPER)
-    row_name = ("電流", "膜電位", "発火率", "車輪")
-    for col in range(3):
-        axes[2, col].sharex(axes[0, col])
-        axes[3, col].sharex(axes[0, col])
-
-    for col, (title, color, series) in enumerate(cases):
-        t, current, membrane, rate, v_left, v_right = series
-        t_v, voltage = firing_window(*membrane)
-        rows = (
-            (t, current),
-            (t_v, voltage),
-            (t, rate),
-            (t, np.column_stack((v_left, v_right))),
-        )
-        for row, (time, values) in enumerate(rows):
-            ax = axes[row, col]
-            draw(ax, time, values[:, 0], values[:, 1], color)
-            if row == 0:
-                ax.axhline(1.0, color=MUTED, lw=0.8, ls=(0, (2, 2)), zorder=0)
-                ax.set_title(title, fontproperties=GOTHIC, fontsize=13, color=INK, pad=8)
-                ax.set_ylim(*padded(np.vstack([values, [[1.0, 1.0]]]), include_zero=True))
-            elif row == 1:
-                ax.axhline(1.0, color=MUTED, lw=0.8, ls=(0, (2, 2)), zorder=0)
-                ax.set_ylim(*padded(np.vstack([values, [[0.0, 0.0], [1.0, 1.0]]]), include_zero=True))
-                ax.set_yticks([0.0, 0.5, 1.0])
-                ax.set_xlabel("時間(拡大)", fontproperties=GOTHIC, fontsize=11, color=INK, labelpad=4)
-            elif row == 3:
-                ax.axhline(0.0, color=SPINE, lw=0.6, zorder=0)
-                ax.set_xlabel("時間(s)", fontproperties=GOTHIC, fontsize=11, color=INK, labelpad=4)
-                ax.set_ylim(-1.4, 1.4)
-                ax.set_yticks([-1.0, 0.0, 1.0])
-            else:
-                ax.set_ylim(*padded(values, include_zero=True))
-            if col == 0:
-                ax.set_ylabel(row_name[row], fontproperties=GOTHIC, fontsize=11, color=INK, labelpad=6)
-
-    legend = [
-        Line2D([0], [0], color=INK, lw=1.6, label="左"),
-        Line2D([0], [0], color=INK, lw=1.6, ls=(0, (4, 2.2)), label="右"),
-        Line2D([0], [0], color=MUTED, lw=0.8, ls=(0, (2, 2)), label="閾値"),
-    ]
-    fig.legend(
-        handles=legend,
-        loc="upper center",
-        ncol=3,
-        frameon=False,
-        bbox_to_anchor=(0.5, 1.02),
-        prop=GOTHIC,
-        fontsize=11,
-        labelcolor=INK,
-    )
-    fig.tight_layout(rect=(0, 0, 1, 0.96))
-    fig.savefig(OUT.with_suffix(".pdf"), bbox_inches="tight", pad_inches=0.25)
-    fig.savefig(OUT.with_suffix(".png"), dpi=160, bbox_inches="tight", pad_inches=0.25)
-    plt.close(fig)
+    paths = prepare()
+    save_case("赤に向かう", RED, approach_run[:6], draw_approach, OUT_APPROACH)
+    save_case("正面の青から遠ざかる", BLUE, retreat, lambda ax: draw_front(ax, paths), OUT_RETREAT)
+    save_case("横の青から回避する", BLUE, avoid, lambda ax: draw_side(ax, paths), OUT_AVOID)
 
 
 if __name__ == "__main__":

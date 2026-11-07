@@ -82,7 +82,8 @@ def triangle(x: float, y: float, heading: float, length: float = 0.16) -> np.nda
     return np.array([page(px, py) for px, py in pts])
 
 
-def main() -> None:
+def draw_approach(ax) -> None:
+    """Overhead approach. The combined poster figure uses this axes too."""
     red = Blob((1.30, -0.40), 0.12)
     scene = Scene(red=red, blue=None, run_s=12.0)
     run = simulate(scene)
@@ -98,8 +99,6 @@ def main() -> None:
     if stop.heading >= 0.0 or stop.y >= 0.0:
         raise RuntimeError("the path did not turn toward the right-hand red")
 
-    fig, ax = plt.subplots(figsize=(6.6, 7.8))
-    fig.patch.set_facecolor(PAPER)
     ax.set_facecolor(PAPER)
 
     horizontal, _ = scene.fovs()
@@ -190,6 +189,10 @@ def main() -> None:
         label.set_fontproperties(GOTHIC)
         label.set_color(MUTED)
 
+def main() -> None:
+    fig, ax = plt.subplots(figsize=(6.6, 7.8))
+    fig.patch.set_facecolor(PAPER)
+    draw_approach(ax)
     fig.tight_layout()
     fig.savefig(OUT.with_suffix(".pdf"), bbox_inches="tight", pad_inches=0.25)
     fig.savefig(OUT.with_suffix(".png"), dpi=160, bbox_inches="tight", pad_inches=0.25)

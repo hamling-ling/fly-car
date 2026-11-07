@@ -323,7 +323,8 @@ def style(ax, xlim=(-1.0, 1.0), ylim=(-1.0, 1.0)) -> None:
     ax.set_facecolor(PAPER)
 
 
-def main() -> None:
+def prepare():
+    """Frontal and lateral traces, and one fan radius shared by both figures."""
     center = cells().current(disk(30.0, 0.5), EXPANSION)
     side = cells().current(disk(20.0, 0.75), EXPANSION)
     straight = trace(center, 1.2)
@@ -340,19 +341,14 @@ def main() -> None:
     if turned[-1].heading < np.deg2rad(30.0):
         raise RuntimeError("the nose did not yaw away from the right-hand blue")
 
-    fig, axes = plt.subplots(1, 2, figsize=(11.2, 7.2))
-    fig.patch.set_facecolor(PAPER)
-
-    # Same reach on both panels, so the blue sits the same distance from
+    # Same reach on both figures, so the blue sits the same distance from
     # the nose. The side disk stays on the right edge of the field.
     half = float(np.arctan(camera_tangents()[0]))
     reach = 0.32
-    side_blue = (reach * np.sin(half), reach * np.cos(half))
     frame = dict(xlim=(-0.5, 0.5), ylim=(-0.40, 0.60))
-
-    # Draw the reverse twice as long as the trace. No distance is printed.
     start = straight[0]
     end = straight[-1]
+    # Draw the reverse twice as long as the trace. No distance is printed.
     backed = replace(
         end,
         x=start.x + 2.0 * (end.x - start.x),
@@ -364,41 +360,66 @@ def main() -> None:
         frame["xlim"],
         frame["ylim"],
     )
+    return {
+        "half": half,
+        "fan": fan,
+        "frame": frame,
+        "start": start,
+        "backed": backed,
+        "straight": straight,
+        "turned": turned,
+        "side_blue": (reach * np.sin(half), reach * np.cos(half)),
+    }
 
-    front, lateral = axes
-    draw_fields(front, start, backed, half, fan)
-    approach(front, (0.0, 0.32))
-    blue_circle(front, (0.0, 0.32))
-    draw_path(front, (start, backed))
-    draw_body(front, start, PAPER)
-    draw_body(front, backed, INK)
-    front.set_title("正面から青を近づける", fontproperties=GOTHIC, fontsize=15, color=INK, pad=10)
-    start_body = triangle(straight[0].x, straight[0].y, straight[0].heading)
+
+def draw_front(ax, pack) -> None:
+    """Straight reverse from a centered blue disk."""
+    start = pack["start"]
+    backed = pack["backed"]
+    draw_fields(ax, start, backed, pack["half"], pack["fan"])
+    approach(ax, (0.0, 0.32))
+    blue_circle(ax, (0.0, 0.32))
+    draw_path(ax, (start, backed))
+    draw_body(ax, start, PAPER)
+    draw_body(ax, backed, INK)
+    start_body = triangle(start.x, start.y, start.heading)
     start_edge = start_body[int(np.argmax(start_body[:, 0]))]
-    text(front, start_edge[0] + 0.04, start_edge[1], "開始", 13, ha="left", va="center")
+    text(ax, start_edge[0] + 0.04, start_edge[1], "開始", 13, ha="left", va="center")
     end_edge = triangle(backed.x, backed.y, backed.heading)
     end_edge_pt = end_edge[int(np.argmax(end_edge[:, 0]))]
-    text(front, end_edge_pt[0] + 0.04, end_edge_pt[1], "停止", 13, ha="left", va="center")
+    text(ax, end_edge_pt[0] + 0.04, end_edge_pt[1], "停止", 13, ha="left", va="center")
+    style(ax, **pack["frame"])
 
-    draw_fields(lateral, turned[0], turned[-1], half, fan)
-    approach(lateral, side_blue)
-    blue_circle(lateral, side_blue)
+
+def draw_side(ax, pack) -> None:
+    """Yaw away from a blue disk on the right edge of the field."""
+    turned = pack["turned"]
+    draw_fields(ax, turned[0], turned[-1], pack["half"], pack["fan"])
+    approach(ax, pack["side_blue"])
+    blue_circle(ax, pack["side_blue"])
     shown = (turned[0], turned[len(turned) // 2], turned[-1])
-    yaw_arrow(lateral, shown)
+    yaw_arrow(ax, shown)
     for sample in shown[:2]:
-        draw_body(lateral, sample, PAPER)
-    draw_body(lateral, shown[-1], INK)
-    lateral.set_title("横から青を近づける", fontproperties=GOTHIC, fontsize=15, color=INK, pad=10)
+        draw_body(ax, sample, PAPER)
+    draw_body(ax, shown[-1], INK)
     turn_start = triangle(turned[0].x, turned[0].y, turned[0].heading)
     turn_left = turn_start[int(np.argmin(turn_start[:, 0]))]
-    text(lateral, turn_left[0] - 0.04, turn_left[1], "開始", 13, ha="right", va="center")
+    text(ax, turn_left[0] - 0.04, turn_left[1], "開始", 13, ha="right", va="center")
     turn_end = triangle(turned[-1].x, turned[-1].y, turned[-1].heading)
     turn_right = turn_end[int(np.argmax(turn_end[:, 0]))]
-    text(lateral, turn_right[0] + 0.04, turn_right[1], "停止", 13, ha="left", va="center")
+    text(ax, turn_right[0] + 0.04, turn_right[1], "停止", 13, ha="left", va="center")
+    style(ax, **pack["frame"])
 
-    style(front, **frame)
-    style(lateral, **frame)
 
+def main() -> None:
+    pack = prepare()
+    fig, axes = plt.subplots(1, 2, figsize=(11.2, 7.2))
+    fig.patch.set_facecolor(PAPER)
+    front, lateral = axes
+    draw_front(front, pack)
+    draw_side(lateral, pack)
+    front.set_title("正面から青を近づける", fontproperties=GOTHIC, fontsize=15, color=INK, pad=10)
+    lateral.set_title("横から青を近づける", fontproperties=GOTHIC, fontsize=15, color=INK, pad=10)
     fig.tight_layout()
     fig.savefig(OUT.with_suffix(".pdf"), bbox_inches="tight", pad_inches=0.22)
     fig.savefig(OUT.with_suffix(".png"), dpi=160, bbox_inches="tight", pad_inches=0.22)
