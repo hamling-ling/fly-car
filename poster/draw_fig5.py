@@ -1,16 +1,18 @@
 """Poster figure: input, membrane, rate, and wheel time series.
 
 The traces follow the poster equations, not the running plant. A red sphere
-on the right becomes a concentration on each half. That concentration
-saturates in the PN, and the bilateral cell subtracts the other side before
-the current reaches DNa02. Escape holds a 30° centered disk and a 20°
-right-eye disk, both expanding at the same rate. DNp01 adds the LC4
-expansion term to the LPLC2 size term. The size term is a Gaussian of
-angular size, and it is zero when the disk is not expanding. Wheels read
-the opposite side. Solid is the left side, dashed the right. The dotted
-line is the membrane threshold. Current, rate, and wheels use the whole
-trial. The membrane row is a short stretch once firing has started, because
-a spike lasts a few milliseconds.
+on the right becomes the red fraction on each eye's range. Those ranges
+overlap: the left reads p from 0 to 0.65 and the right reads p from 0.35
+to 1. The fraction saturates in the PN, and each DNa02 subtracts the other
+side. Escape holds a 30° centered disk and a 20° right-eye disk, both
+expanding at the same rate. A cell reads the vertical blue fraction of the
+column at its stretched screen position. DNp01 adds the LC4 expansion term
+to the LPLC2 size term. The size term is a Gaussian of angular size, and it
+is zero when the disk is not expanding. Wheels read the opposite side.
+Solid is the left side, dashed the right. The dotted line is the membrane
+threshold. Current, rate, and wheels use the whole trial. The membrane row
+is a short stretch once firing has started, because a spike lasts a few
+milliseconds.
 
 The poster leaves the sigmoid, the size curve, and the wheel scale as
 symbols. The numbers below are only for this picture.
@@ -19,7 +21,6 @@ symbols. The numbers below are only for this picture.
 import sys
 from pathlib import Path
 
-import cv2
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.font_manager import FontProperties
@@ -44,7 +45,11 @@ RED = "#b4232c"
 BLUE = "#1d5f99"
 
 # Poster symbols, fixed here so the picture can be drawn.
-SIGMA_D = 0.15
+# Equation (1): left range through 0.65, right range from 0.35.
+LEFT_HI = 0.65
+RIGHT_LO = 0.35
+# Same stretch as the structure figure. The old midline lands at 0.65 and 0.35.
+STRETCH = (0.5 + 0.15) / 0.5
 N_ORN = 1.0
 C0 = 0.05
 ALPHA = 4.0
@@ -67,8 +72,6 @@ MOVE_MPS = FORWARD_PER_HZ * FULL_RATE
 WIDTH, HEIGHT = 320, 180
 HOLD = 20
 APPROACH_S = 2.4
-
-PACK = cells()
 
 
 def expansion(theta_dot: float) -> float:
@@ -94,33 +97,42 @@ def bilateral(concentration: np.ndarray) -> np.ndarray:
     return ALPHA * np.array([u[0] - BETA * u[1], u[1] - BETA * u[0]])
 
 
-def halves(field: np.ndarray) -> np.ndarray:
-    """Mean spread on the left half and the right half."""
-    width = field.shape[1]
-    mid = width // 2
-    return np.array([float(field[:, :mid].mean()), float(field[:, mid:].mean())])
+def eye_mean(mask: np.ndarray) -> np.ndarray:
+    """Red fraction on the left range and the right range. A red pixel is 1."""
+    width = mask.shape[1]
+    p = (np.arange(width) + 0.5) / width
+    field = np.asarray(mask, dtype=np.float64)
+    return np.array(
+        [float(field[:, p <= LEFT_HI].mean()), float(field[:, p >= RIGHT_LO].mean())]
+    )
 
 
-def spread(mask: np.ndarray) -> np.ndarray:
-    """a(x). A colored pixel stays at 1. An empty mask stays at 0."""
-    color = np.asarray(mask, dtype=bool)
-    if not np.any(color):
-        return np.zeros(color.shape, dtype=np.float64)
-    src = np.where(color, 0, 255).astype(np.uint8)
-    dist = cv2.distanceTransform(src, cv2.DIST_L2, 5) / color.shape[1]
-    return np.exp(-0.5 * (dist / SIGMA_D) ** 2)
+def widen(u: np.ndarray) -> np.ndarray:
+    """Stretch each eye from its lateral edge onto the overlapping ranges."""
+    out = np.empty(u.shape, dtype=np.float64)
+    left = u <= 0.5
+    out[left] = u[left] * STRETCH
+    out[~left] = 1.0 - (1.0 - u[~left]) * STRETCH
+    return out
 
 
-def fraction(pop, field: np.ndarray) -> np.ndarray:
-    """F on the left and the right. f_i is the mean of a over the cell's pixels."""
-    height, width = field.shape
-    ui = np.clip(np.rint(pop.u * width - 0.5).astype(np.int64), 0, width - 1)
-    vi = np.clip(np.rint(pop.v * height - 0.5).astype(np.int64), 0, height - 1)
-    ends = np.append(pop.starts[1:], len(pop.u))
-    covered = np.empty(len(pop.starts))
-    for i, (start, stop) in enumerate(zip(pop.starts, ends)):
-        pixels = np.unique(vi[start:stop] * width + ui[start:stop])
-        covered[i] = field[pixels // width, pixels % width].mean()
+def cell_p(pop) -> np.ndarray:
+    """Screen position of each cell: the synapse-weighted mean, then stretched."""
+    total = np.add.reduceat(pop.n * pop.u, pop.starts)
+    return widen(total / pop.cell_n)
+
+
+PACK = cells()
+LC4_P = cell_p(PACK.lc4)
+LPLC_P = cell_p(PACK.lplc2)
+
+
+def fraction(pop, p_i: np.ndarray, mask: np.ndarray) -> np.ndarray:
+    """F on the left and the right. f_i is the vertical blue fraction at p_i."""
+    width = mask.shape[1]
+    columns = np.asarray(mask, dtype=np.float64).mean(axis=0)
+    ui = np.clip(np.rint(p_i * width - 0.5).astype(np.int64), 0, width - 1)
+    covered = columns[ui]
     out = np.zeros(2)
     for side in (0, 1):
         chosen = pop.side == side
@@ -194,7 +206,7 @@ def approach():
     volts = []
     for i in range(0, n, HOLD):
         view = project_blob(scene, x, y, heading, scene.red)
-        current = bilateral(halves(spread(view_mask(view))))
+        current = bilateral(eye_mean(view_mask(view)))
         for _ in range(HOLD):
             dna[0].step(float(current[0]))
             dna[1].step(float(current[1]))
@@ -217,9 +229,9 @@ def approach():
 def escape(theta_deg: float, cu: float, seconds: float):
     """Hold one blue disk and one expansion. Red stays absent."""
     spot = disk(theta_deg, cu)
-    field = spread(ellipse(spot.cu, spot.cv, spot.ru, spot.rv))
-    weight = expansion(EXPANSION) * fraction(PACK.lc4, field)
-    weight = weight + size_term(spot.theta, EXPANSION) * fraction(PACK.lplc2, field)
+    mask = ellipse(spot.cu, spot.cv, spot.ru, spot.rv)
+    weight = expansion(EXPANSION) * fraction(PACK.lc4, LC4_P, mask)
+    weight = weight + size_term(spot.theta, EXPANSION) * fraction(PACK.lplc2, LPLC_P, mask)
     current = ALPHA * weight
     dnp = [Lif(), Lif()]
     v_left = v_right = 0.0
