@@ -18,6 +18,7 @@ from flycar.occupancy import (
     Counts,
     half_counts,
     load_cuts,
+    red_place,
 )
 
 
@@ -69,6 +70,14 @@ def test_loader_rejects_a_missing_file(tmp_path: Path) -> None:
         load_cuts(tmp_path / "missing.json")
 
 
+def test_red_place_follows_the_centroid() -> None:
+    """右端の列は +1 側、赤が無いマスクは 0 である。"""
+    mask = np.zeros((4, 10), dtype=bool)
+    mask[:, 9] = True
+    assert red_place(mask) == pytest.approx(0.9)
+    assert red_place(np.zeros((4, 10), dtype=bool)) == 0.0
+
+
 def test_black_is_empty() -> None:
     assert half_counts(_frame()) == (0.0, 0.0, 0.0, 0.0)
 
@@ -79,9 +88,11 @@ def test_counts_hold_a_frame_and_clear_a_bad_one(capsys: pytest.CaptureFixture[s
     frame = _frame()
     frame[:, :4] = (0, 0, 255)
     assert counts.update(frame) is True
-    assert counts.values[0] == 1.0
+    # Left half of an 8-wide frame fills 4 of the 5 columns in p <= 0.65.
+    assert counts.values[0] == pytest.approx(0.8)
+    assert counts.values[1] == pytest.approx(0.2)
     assert counts.update(None) is True
-    assert counts.values[0] == 1.0
+    assert counts.values[0] == pytest.approx(0.8)
     assert counts.update(np.zeros((4, 8), dtype=np.uint8)) is False
     assert counts.values == (0.0, 0.0, 0.0, 0.0)
     assert "BGR" in capsys.readouterr().out
@@ -92,7 +103,9 @@ def test_counts_pass_mirror_through() -> None:
     frame = _frame()
     frame[:, :4] = (0, 0, 255)
     assert counts.update(frame, mirror=True) is True
-    assert counts.values[1] == 1.0
+    # Mirrored, the red sits on the right. Four of the five right-range columns are red.
+    assert counts.values[0] == pytest.approx(0.2)
+    assert counts.values[1] == pytest.approx(0.8)
 
 
 def test_red_on_the_left_and_blue_on_the_right() -> None:

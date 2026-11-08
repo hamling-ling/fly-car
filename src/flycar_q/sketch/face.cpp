@@ -4,7 +4,9 @@
 #include <Arduino_LED_Matrix.h>
 
 static const int FACE_PIXELS = 104;
-static const unsigned long FACE_BLANK_MS = 450;
+// 青の 1 枚は 1 秒近くかかる。そのあいだ絵とランプは点いたままにする。
+// Python が止まったときは 3 秒で消す。
+static const unsigned long FACE_BLANK_MS = 3000;
 
 static Arduino_LED_Matrix matrix;
 static unsigned long lastFaceMs = 0;

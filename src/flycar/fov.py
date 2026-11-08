@@ -1,9 +1,11 @@
 """Closed-loop drive through one camera's field of view.
 
 A sphere counts only when its projection overlaps the image rectangle.
-``View.left`` and ``View.right`` are how much of each image half the sphere
-covers horizontally, divided by that half's width. Vertical clipping does not
-shrink the width. Counts are held for ``Scene.hold_steps`` membrane steps.
+``View.left`` and ``View.right`` are how much of each eye's range the sphere
+covers horizontally, divided by that range's width. The left range runs from
+the left edge to ``LEFT_HI``, and the right range runs from ``RIGHT_LO`` to
+the right edge. Vertical clipping does not shrink the width. Counts are held
+for ``Scene.hold_steps`` membrane steps.
 
 Heading 0 faces +x and left is +y. Image ``nx`` is -1 to +1, right positive,
 ``ny`` is -1 to +1, up positive.
@@ -21,7 +23,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from flycar.behavior import DT, Plant, dna_current
-from flycar.loom import LoomTrack, camera_tangents, project_rel
+from flycar.loom import LEFT_HI, RIGHT_LO, LoomTrack, camera_tangents, project_rel
 
 
 @dataclass(frozen=True)
@@ -243,9 +245,12 @@ def project_blob(scene: Scene, x: float, y: float, heading: float, blob: Blob | 
     def overlap(b0: float, b1: float) -> float:
         return max(0.0, min(a1, b1) - max(a0, b0))
 
-    # Each image half has width 1 in normalized coordinates.
-    left = float(np.clip(overlap(-1.0, 0.0), 0.0, 1.0))
-    right = float(np.clip(overlap(0.0, 1.0), 0.0, 1.0))
+    # p = (nx + 1) / 2. Each eye's range is 0.65 wide in p, so 1.30 in nx.
+    left_hi = 2.0 * LEFT_HI - 1.0
+    right_lo = 2.0 * RIGHT_LO - 1.0
+    span = left_hi - (-1.0)
+    left = float(np.clip(overlap(-1.0, left_hi) / span, 0.0, 1.0))
+    right = float(np.clip(overlap(right_lo, 1.0) / span, 0.0, 1.0))
     return View(nx, ny, nrx, nry, True, left, right)
 
 
@@ -274,9 +279,14 @@ def simulate(scene: Scene) -> Run:
         disk = _blue_disk(scene, plant.x, plant.y, plant.heading, tan_h, tan_v)
         track.update(disk, i * DT)
         photo = (plant.x, plant.y, plant.heading)
-        step = plant.step(red.left, red.right, blue.left, blue.right, loom=track.current)
+        place = float(np.clip(red.nx, -1.0, 1.0)) if red.inside else 0.0
+        step = plant.step(
+            red.left, red.right, blue.left, blue.right, loom=track.current, place=place
+        )
         for _ in range(scene.hold_steps - 1):
-            step = plant.step(red.left, red.right, blue.left, blue.right, loom=track.current)
+            step = plant.step(
+                red.left, red.right, blue.left, blue.right, loom=track.current, place=place
+            )
         samples.append(
             Sample(
                 t=i * DT,
@@ -285,7 +295,7 @@ def simulate(scene: Scene) -> Run:
                 heading=photo[2],
                 red=red,
                 blue=blue,
-                i_dna=dna_current(red.left, red.right),
+                i_dna=dna_current(red.left, red.right, place),
                 i_gf=track.current,
                 rate_dna=(plant.dna_l.rate, plant.dna_r.rate),
                 rate_gf=(plant.gf_l.rate, plant.gf_r.rate),

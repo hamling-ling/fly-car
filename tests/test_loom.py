@@ -11,31 +11,23 @@ import numpy as np
 import pytest
 
 from flycar.behavior import hold
-from flycar.hinge import calibrated_command
-from flycar.occupancy import Counts
 from flycar.loom import (
+    ALPHA,
     BLUE_MIN_FRACTION,
     CELLS_PATH,
-    CENTER_RATIO,
-    CENTER_SIGMA,
-    EARLY_MID,
-    EARLY_WIDTH,
-    LC4_GAIN,
-    LPLC2_SHARE,
-    SIZE_BOTH,
-    R_MAX,
-    R_REF,
+    EXPANSION_FLOOR,
+    K_S,
+    SIGMOID_MID,
+    SIGMOID_WIDTH,
     Disk,
     LoomTrack,
-    anchored_sigmoid,
     camera_tangents,
     cells,
-    center_band,
+    expansion,
     measure_blue,
-    roughly_centered,
-    size_gain,
+    size_term,
 )
-from flycar.pulse import REVERSE_START, wheel_pulses
+from flycar.occupancy import Counts
 
 
 def _disk(theta_deg: float, cu: float) -> Disk:
@@ -47,18 +39,16 @@ def _disk(theta_deg: float, cu: float) -> Disk:
     return Disk(cu, 0.5, rod / tan_h / 2.0, rod / tan_v / 2.0, theta)
 
 
-def test_sigmoid_keeps_the_notebook_shape_at_the_camera_center() -> None:
-    """ノートの早めた列は中心 8、幅 5。車は 20° が 0.4 rad/s で開くように置いてある。"""
-    assert anchored_sigmoid(0.0, 8.0, 5.0) == pytest.approx(0.0, abs=1e-12)
-    assert anchored_sigmoid(12.0, 8.0, 5.0) == pytest.approx(0.627, abs=1e-3)
-    assert (EARLY_MID, EARLY_WIDTH) == (0.20, 0.10)
-    assert LC4_GAIN == 6.0
-    assert (R_MAX, R_REF) == (100.0, 50.0)
-    assert anchored_sigmoid(0.0) == pytest.approx(0.0, abs=1e-12)
-    assert 0.3 < anchored_sigmoid(0.2) < 0.6
-    assert anchored_sigmoid(0.4) > 0.8
-    assert size_gain(np.deg2rad(40.0)) == pytest.approx(1.0)
-    assert size_gain(np.deg2rad(10.0)) == pytest.approx(0.325, abs=1e-2)
+def test_sigmoid_is_the_poster_logistic() -> None:
+    """中心 0.20 rad/s、幅 0.10 rad/s。停止は約 0.12 で、0.4 rad/s は 1 に近い。"""
+    assert (K_S, SIGMOID_MID, SIGMOID_WIDTH) == (1.0, 0.20, 0.10)
+    assert ALPHA == pytest.approx(4.0)
+    assert expansion(0.0) == pytest.approx(0.1192, abs=1e-3)
+    assert expansion(0.4) > 0.8
+    assert expansion(0.0) < 0.2
+    assert size_term(np.deg2rad(10.0), 0.4) == 1.0
+    assert size_term(np.deg2rad(40.0), 0.4) == 1.0
+    assert size_term(np.deg2rad(40.0), 0.0) == 0.0
 
 
 def test_shipped_table_has_the_notebook_synapse_totals() -> None:
@@ -70,158 +60,135 @@ def test_shipped_table_has_the_notebook_synapse_totals() -> None:
     assert pack.side_ref[1] == pytest.approx(4800.0)
 
 
-def test_a_stopped_sheet_filling_the_frame_backs_straight() -> None:
-    """画面を覆う止まった青は、両輪が後退の床を超えてまっすぐ下がる。"""
-    assert LPLC2_SHARE == pytest.approx(3.0)
-    assert SIZE_BOTH == pytest.approx(0.5)
+def test_a_stopped_sheet_filling_the_frame_stays_under_threshold() -> None:
+    """画面を覆う止まった青は、視角の項が 0 なので閾値を超えない。"""
     disk = measure_blue(np.ones((72, 128), dtype=bool))
+    assert disk is not None
     loom = cells().current(disk, 0.0)
-    assert min(loom) > 1.5
+    assert max(loom) < 1.0
     got = hold(0.0, 0.0, 1.0, 1.0, seconds=0.8, settle=0.3, loom=loom)
-    assert got.mode == "back"
-    assert got.heading == pytest.approx(0.0, abs=1e-6)
-    assert got.omega == pytest.approx(0.0, abs=1e-9)
-    sent = calibrated_command(*wheel_pulses(got.v_left, got.v_right))
-    assert sent[0] <= -REVERSE_START
-    assert sent[1] <= -REVERSE_START
-
-
-def test_a_stopped_full_eye_stays_under_threshold() -> None:
-    """左眼を覆う 40° は、止まっていれば閾値を超えない。"""
-    disk = Disk(0.25, 0.5, 0.30, 0.60, theta=float(np.deg2rad(40.0)))
-    still = cells().current(disk, 0.0)
-    assert still[0] < 1.0
-    assert still[0] > 0.5
-    got = hold(0.0, 0.0, 0.9, 0.0, loom=still)
     assert got.mode == "stop"
     assert got.x == pytest.approx(0.0, abs=1e-9)
+    assert got.heading == pytest.approx(0.0, abs=1e-9)
 
 
-def test_twenty_degrees_on_the_right_eye_crosses_around_a_half_meter() -> None:
-    """右目中央の 20° は、0.4 rad/s で閾値を超え、停止では超えない。
-
-    この紙のおよそ 50 cm である。右目中央の 10° は、拡大が頭打ちのとき超える。
-    """
-    disk = _disk(20.0, 0.75)
-    approach = cells().current(disk, 0.4)
-    still = cells().current(disk, 0.0)
-    assert approach[0] == 0.0
-    assert approach[1] > 1.0
-    assert still[1] < 1.0
-    assert still[1] > 0.3
-    stopped = hold(0.0, 0.0, 0.0, 0.9, loom=still)
-    assert stopped.mode == "stop"
-    moved = hold(0.0, 0.0, 0.0, 0.0, seconds=0.4, settle=0.1, loom=approach)
-    assert moved.mode == "back"
-    assert moved.omega > 0.5
-    assert moved.heading > 0.1
-    assert moved.v_left < moved.v_right < 0.0
-    far = cells().current(_disk(10.0, 0.75), 50.0)
-    assert far[1] > 1.0
+def test_jitter_below_the_expansion_floor_stays_under_threshold() -> None:
+    """0.04 rad/s の視角の揺れはサイズ項を付けず、0.4 rad/s は発火する。"""
+    disk = _disk(30.0, 0.50)
+    assert EXPANSION_FLOOR == pytest.approx(0.10)
+    quiet = cells().current(disk, 0.04)
+    fired = cells().current(disk, 0.4)
+    assert max(quiet) < 1.0
+    assert min(fired) > 1.0
+    assert size_term(disk.theta, 0.04) == 0.0
+    assert size_term(disk.theta, EXPANSION_FLOOR) == 1.0
 
 
-def test_a_sheet_a_degree_off_center_does_not_turn() -> None:
-    """22° を中心から約 1° ずらしても回頭しない。負の指令は −36 ずらして送る。"""
-    loom = cells().current(_disk(22.0, 0.48), 0.4)
-    assert min(loom) / max(loom) >= 0.25
-    got = hold(0.0, 0.0, 0.0, 0.0, seconds=0.8, settle=0.3, loom=loom)
-    assert got.heading == pytest.approx(0.0, abs=1e-6)
-    assert got.omega == pytest.approx(0.0, abs=1e-9)
-    assert calibrated_command(*wheel_pulses(got.v_left, got.v_right)) == (-69, -71)
-
-
-def test_a_closer_sheet_a_degree_off_center_backs_straight() -> None:
-    """30° を約 1° ずらすと、両輪が後退の床を超えてまっすぐ下がる。"""
-    loom = cells().current(_disk(30.0, 0.48), 0.4)
-    got = hold(0.0, 0.0, 0.0, 0.0, seconds=0.8, settle=0.3, loom=loom)
-    assert got.mode == "back"
-    assert got.heading == pytest.approx(0.0, abs=1e-6)
-    assert got.omega == pytest.approx(0.0, abs=1e-9)
-    sent = calibrated_command(*wheel_pulses(got.v_left, got.v_right))
-    assert sent[0] <= -REVERSE_START
-    assert sent[1] <= -REVERSE_START
-
-
-def test_a_rectangular_sheet_fires_where_the_circle_stays_quiet() -> None:
-    """四角い紙は、円だと弱い側が閾値の下で、画素が青の列だと両輪が後退する。
-
-    180×320 の u 0.34–0.80、v 0.25–0.75。6 は、この弱い側が 1 を少し超えるように手で置いた数である。
-    """
-    height, width = 180, 320
-    mask = np.zeros((height, width), dtype=bool)
-    mask[45:135, 108:256] = True
-    quiet = np.zeros((height, width), dtype=bool)
-    quiet[60:120, 140:220] = True
-    frame = np.zeros((height, width, 3), dtype=np.uint8)
-    counts = Counts()
-    frame[quiet] = (255, 0, 0)
-    assert counts.update(frame, now=0.0)
-    frame[:] = 0
-    frame[mask] = (255, 0, 0)
-    assert counts.update(frame, now=0.10)
-    disk = measure_blue(mask)
-    assert disk is not None
-    circle = cells().current(disk, counts.theta_dot)
-    assert counts.loom == pytest.approx(cells().current(disk, counts.theta_dot, mask))
-    assert circle[0] < 1.0 <= counts.loom[0]
-    assert min(counts.loom) / max(counts.loom) >= 0.25
-    got = hold(0.0, 0.0, 0.0, 0.0, seconds=0.8, settle=0.3, loom=counts.loom)
-    assert got.mode == "back"
-    assert got.heading == pytest.approx(0.0, abs=1e-6)
-    assert got.omega == pytest.approx(0.0, abs=1e-9)
-    sent = calibrated_command(*wheel_pulses(got.v_left, got.v_right))
-    assert sent[0] <= -REVERSE_START
-    assert sent[1] <= -REVERSE_START
-
-
-def _span(u0: float, u1: float, height: int = 180, width: int = 320) -> np.ndarray:
-    """Full-height boolean sheet from image ``u0`` to ``u1``."""
-    mask = np.zeros((height, width), dtype=bool)
-    x0 = int(np.floor(u0 * width))
-    x1 = int(np.ceil(u1 * width))
-    mask[:, x0:x1] = True
-    return mask
-
-
-def test_a_slightly_right_sheet_stimulates_the_center_band() -> None:
-    """弱い側が点の約 1/4 を超える右寄りの紙は、±2σ の LC4 を両目で刺激する。
-
-    σ は 0.111。注意して合わせた 0.611 を 1σ にした帯は u の 0.278 から 0.722。
-    画素が右にはみ出していても、拡大があれば左右の電流は揃って閾値を超える。
-    """
-    assert CENTER_SIGMA == pytest.approx(0.111)
-    assert CENTER_RATIO == pytest.approx(0.25)
-    assert center_band() == pytest.approx((0.278, 0.722))
-    mask = _span(0.42, 0.80)
-    assert roughly_centered(mask)
-    disk = measure_blue(mask)
-    assert disk is not None
-    loom = cells().current(disk, 0.9, mask)
-    assert min(loom) > 2.0
+def test_an_expanding_frontal_disk_backs_both_wheels() -> None:
+    """正面の 30° が 0.4 rad/s で広がると、左右とも閾値を超えて両輪が下がる。"""
+    loom = cells().current(_disk(30.0, 0.50), 0.4)
+    assert min(loom) > 1.0
     assert min(loom) / max(loom) > 0.9
     got = hold(0.0, 0.0, 0.0, 0.0, seconds=0.8, settle=0.3, loom=loom)
     assert got.mode == "back"
-    assert got.omega == pytest.approx(0.0, abs=1e-6)
-    sent = calibrated_command(*wheel_pulses(got.v_left, got.v_right))
-    assert sent[0] < 0 and sent[1] < 0
+    assert got.v_left < -0.05
+    assert got.v_right < -0.05
+    assert got.heading == pytest.approx(0.0, abs=1e-3)
+    assert got.omega == pytest.approx(0.0, abs=1e-3)
 
 
-def test_a_right_hand_sheet_keeps_one_eye() -> None:
-    """真ん中をまたがない右の紙は、画素の下の列だけを刺激し、左の電流は出ない。"""
-    mask = _span(0.62, 0.90)
-    assert not roughly_centered(mask)
-    disk = measure_blue(mask)
-    assert disk is not None
-    left, right = cells().current(disk, 0.9, mask)
-    assert left == 0.0
+def test_twenty_degrees_on_the_right_reverses_the_far_wheel() -> None:
+    """右の 20° は 0.4 rad/s で右だけが閾値を超え、左輪だけが下がる。停止では超えない。"""
+    disk = _disk(20.0, 0.75)
+    approach = cells().current(disk, 0.4)
+    still = cells().current(disk, 0.0)
+    assert approach[1] > 1.0
+    assert approach[0] < 1.0
+    assert max(still) < 1.0
+    stopped = hold(0.0, 0.0, 0.0, 0.9, loom=still)
+    assert stopped.mode == "stop"
+    moved = hold(0.0, 0.0, 0.0, 0.0, seconds=0.8, settle=0.3, loom=approach)
+    assert moved.mode == "back"
+    assert moved.v_left < moved.v_right
+    assert moved.v_left < -0.05
+    assert moved.v_right == pytest.approx(0.0, abs=1e-4)
+    assert moved.omega > 0.3
+    assert moved.heading > 0.3
+
+
+def test_a_disk_near_the_middle_drives_both_eyes() -> None:
+    """重なりがあるので、中央付近の円は左右の両方に入る。"""
+    left, right = cells().current(_disk(30.0, 0.50), 0.4)
+    assert left > 1.0
     assert right > 1.0
 
 
-def test_a_disk_on_the_right_does_not_drive_the_left() -> None:
-    disk = Disk(0.75, 0.5, 0.12, 0.25, theta=float(np.deg2rad(40.0)))
-    left, right = cells().current(disk, 20.0)
-    assert left == 0.0
-    assert right > 0.0
+def test_a_small_disk_on_the_right_leaves_the_left_quiet() -> None:
+    """右に寄った小さい円は、左の電流を出さない。"""
+    left, right = cells().current(
+        Disk(0.75, 0.5, 0.12, 0.25, theta=float(np.deg2rad(40.0))),
+        20.0,
+    )
+    assert left == pytest.approx(0.0, abs=1e-6)
+    assert right > 1.0
+
+
+def test_a_degree_off_center_yaws_while_both_wheels_reverse() -> None:
+    """中心から約 1° ずらした 22° は両輪が下がり、帯が無いので少し回る。"""
+    loom = cells().current(_disk(22.0, 0.48), 0.4)
+    assert min(loom) > 1.0
+    got = hold(0.0, 0.0, 0.0, 0.0, seconds=0.8, settle=0.3, loom=loom)
+    assert got.mode == "back"
+    assert got.v_left < 0.0
+    assert got.v_right < 0.0
+    assert abs(got.omega) > 0.05
+    assert abs(got.heading) < 0.5
+
+
+def test_a_slightly_right_sheet_backs_and_yaws() -> None:
+    """右寄りの紙は右の電流が強く、左輪がより強く下がる。"""
+    mask = np.zeros((180, 320), dtype=bool)
+    mask[:, int(np.floor(0.42 * 320)) : int(np.ceil(0.80 * 320))] = True
+    disk = measure_blue(mask)
+    assert disk is not None
+    left, right = cells().current(disk, 0.9, mask)
+    assert right > left > 1.0
+    got = hold(0.0, 0.0, 0.0, 0.0, seconds=0.8, settle=0.3, loom=(left, right))
+    assert got.mode == "back"
+    assert got.v_left < got.v_right < 0.0
+    assert got.omega > 0.0
+
+
+def test_a_right_hand_sheet_keeps_one_eye() -> None:
+    """真ん中をまたがない右の紙は、左の電流を出さない。"""
+    mask = np.zeros((180, 320), dtype=bool)
+    mask[:, int(np.floor(0.62 * 320)) : int(np.ceil(0.90 * 320))] = True
+    disk = measure_blue(mask)
+    assert disk is not None
+    left, right = cells().current(disk, 0.9, mask)
+    assert left == pytest.approx(0.0, abs=1e-6)
+    assert right > 1.0
+
+
+def test_counts_pass_the_mask_into_the_current() -> None:
+    """青の画素は、円ではなくそのマスクの列の割合として電流になる。"""
+    height, width = 180, 320
+    mask = np.zeros((height, width), dtype=bool)
+    mask[45:135, 108:256] = True
+    frame = np.zeros((height, width, 3), dtype=np.uint8)
+    counts = Counts()
+    frame[mask] = (255, 0, 0)
+    assert counts.update(frame, now=0.0)
+    grown = mask.copy()
+    grown[40:140, 100:260] = True
+    frame[:] = 0
+    frame[grown] = (255, 0, 0)
+    assert counts.update(frame, now=0.10)
+    disk = measure_blue(grown)
+    assert disk is not None
+    assert counts.theta_dot > 0.0
+    assert counts.loom == pytest.approx(cells().current(disk, counts.theta_dot, grown))
+    assert max(counts.loom) > 1.0
 
 
 def test_raster_disk_recovers_its_angular_size() -> None:
@@ -252,8 +219,7 @@ def test_expansion_waits_for_a_second_frame_and_ignores_shrinkage() -> None:
     grown = Disk(0.75, 0.5, 0.12, 0.20, theta=0.55)
     track.update(grown, 0.20)
     assert track.theta_dot == pytest.approx(1.5)
-    shrunk = Disk(0.75, 0.5, 0.08, 0.14, theta=0.30)
-    track.update(shrunk, 0.30)
+    track.update(Disk(0.75, 0.5, 0.08, 0.14, theta=0.30), 0.30)
     assert track.theta_dot == 0.0
     track.update(None, 0.40)
     assert track.current == (0.0, 0.0)

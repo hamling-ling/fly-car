@@ -1,13 +1,16 @@
-"""Half-frame red and blue fill from a camera image.
+"""Eye-range red and blue fill from a camera image.
 
-``project_blob`` measures how much of a drawn sphere overlaps each half.
-A real frame is counted the other way: the fraction of pixels in that half
-whose color falls in the red or blue range. Position inside the half does
-not matter.
+``project_blob`` measures how much of a drawn sphere overlaps each eye.
+A real frame is counted the other way: the fraction of pixels in that eye's
+range whose color falls in the red or blue range. The left range is ``p``
+from 0 to 0.65 and the right range is ``p`` from 0.35 to 1, so the middle
+is in both. ``half_counts`` still splits the frame at the midline. The
+color tests use that split. The motors read ``range_means``.
 
 The blue fill is for the face and the log. It is not the DNp01 current.
 ``Counts.loom`` is that current, from ``flycar.loom``. Angle and expansion
-come from the largest region. A column counts when its pixel is blue.
+come from the largest region. Each cell reads the vertical blue fraction
+of the column at its stretched screen position.
 
 The gates are read once from ``color_thresholds.json`` beside this file.
 ``research/color_capture_q/fit_thresholds.py`` writes that file. Restart the
@@ -27,7 +30,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from flycar.loom import LoomTrack, measure_blue
+from flycar.loom import LEFT_HI, RIGHT_LO, LoomTrack, measure_blue
 
 THRESHOLDS_PATH = Path(__file__).with_name("color_thresholds.json")
 
@@ -116,6 +119,54 @@ def _fill(mask: np.ndarray, x0: int, x1: int) -> float:
     return float(np.count_nonzero(part)) / float(part.size)
 
 
+def red_place(mask: np.ndarray) -> float:
+    """Red centroid as -1 at the left edge and +1 at the right edge.
+
+    Empty red is 0, so a blank frame does not amplify the wheel difference.
+    ``p`` is 0 at the left edge and 1 at the right edge.
+    """
+    image = np.asarray(mask)
+    if image.ndim != 2 or image.size == 0:
+        return 0.0
+    width = int(image.shape[1])
+    if width == 0:
+        return 0.0
+    columns = np.asarray(image, dtype=np.float64).sum(axis=0)
+    total = float(columns.sum())
+    if total <= 0.0:
+        return 0.0
+    p = (np.arange(width) + 0.5) / float(width)
+    centroid = float(np.dot(columns, p) / total)
+    place = (centroid - 0.5) / 0.5
+    if place > 1.0:
+        return 1.0
+    if place < -1.0:
+        return -1.0
+    return place
+
+
+def range_means(mask: np.ndarray) -> tuple[float, float]:
+    """Mean of ``mask`` on the left eye and the right eye.
+
+    ``p`` is 0 at the left edge and 1 at the right edge. The left eye reads
+    columns with ``p <= LEFT_HI``. The right eye reads ``p >= RIGHT_LO``.
+    The two ranges overlap, so a pixel near the middle is in both.
+    """
+    image = np.asarray(mask)
+    if image.ndim != 2:
+        raise ValueError("mask must be a 2D image")
+    width = int(image.shape[1])
+    if width == 0 or image.size == 0:
+        return 0.0, 0.0
+    p = (np.arange(width) + 0.5) / float(width)
+    field = np.asarray(image, dtype=np.float64)
+    left = field[:, p <= LEFT_HI]
+    right = field[:, p >= RIGHT_LO]
+    left_mean = float(left.mean()) if left.size else 0.0
+    right_mean = float(right.mean()) if right.size else 0.0
+    return left_mean, right_mean
+
+
 def half_counts(frame_bgr: np.ndarray, *, mirror: bool = False) -> tuple[float, float, float, float]:
     """Return ``(red_l, red_r, blue_l, blue_r)`` in 0..1.
 
@@ -142,10 +193,11 @@ def _halves(
 
 
 class Counts:
-    """Last half-frame fills, and the loom current of the blue region."""
+    """Last eye-range fractions, and the loom current of the blue region."""
 
     def __init__(self) -> None:
         self.values = (0.0, 0.0, 0.0, 0.0)
+        self.place = 0.0
         self.loom = (0.0, 0.0)
         self.theta = 0.0
         self.theta_dot = 0.0
@@ -171,12 +223,14 @@ class Counts:
         except ValueError as exc:
             print(f"counts: {exc}")
             self.values = (0.0, 0.0, 0.0, 0.0)
+            self.place = 0.0
             self._clear_loom()
             return False
         if mirror:
             red = np.ascontiguousarray(np.fliplr(red))
             blue = np.ascontiguousarray(np.fliplr(blue))
-        self.values = _halves(red, blue, mirror=False)
+        self.values = (*range_means(red), *range_means(blue))
+        self.place = red_place(red)
         when = 0.0 if now is None else float(now)
         self.loom = self._track.update(measure_blue(blue), when, blue)
         self.theta = self._track.theta

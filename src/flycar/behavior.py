@@ -1,52 +1,44 @@
-"""Red occupancy and a loom current to two wheel speeds.
+"""Red concentration and a loom current to two wheel speeds.
 
-Red counts run from 0 to 1 and are the filled fraction of each half of the
-frame. Left and right are the two halves. Position inside one half does not
-matter. Counts below ``COUNT_FLOOR`` are read as empty.
+Red runs from 0 to 1 and is the filled fraction of one eye's range. The
+ranges overlap: the left reads the image from the left edge through 0.65,
+and the right reads from 0.35 through the right edge. That fraction
+saturates in a PN. Each DNa02 keeps the ipsilateral PN and subtracts
+``BETA`` times the other side. A negative result pulls the membrane down
+and does not spike.
 
-DNa02 takes that red count. DNp01 does not. Its current is computed by
-``flycar.loom`` from the blue region's angular size and expansion, then
-passed in as ``loom``. A blue fill with no loom current does not fire.
-The wheels read the firing rates directly:
+DNp01 does not read the red fraction. Its current is computed by
+``flycar.loom`` from the blue columns, then passed in as ``loom``. A blue
+fill with no loom current does not fire.
 
-- forward speed is the red sum minus ``BLUE_FORWARD`` times the blue sum.
-  A negative result reverses; it is not clipped to a stop
-- red yaw is ``RED_YAW`` times the red difference and is split across both
-  wheels. Positive yaw is a left turn, so a right-hand red turns right
-- blue yaw is ``BLUE_YAW`` times the blue difference, and that term is
-  dropped when both eyes share the sheet. It is extra reverse on the wheel
-  away from the stronger eye. The near wheel keeps the path speed. A
-  right-hand DNp01 turns left. Blue drives neither wheel forward
+A red centroid toward an image edge multiplies both eye fractions by
+``1 + KAPPA * |place|`` before the PN and before the yaw. The empty eye
+stays at 0. At the center the factor is 1, so the fractions pass through.
+Forward speed is the mean of the two DNa02 rates. Yaw is the left-minus-right
+value of that scaled concentration, in radians per second, and it stops at
+``YAW_CAP``. A sheet that fills both eyes still turns toward the heavier
+eye, and equal concentrations stay straight. DNp01 is not part of that yaw:
+a one-sided loom still drives only the opposite wheel. Each command is divided by one
+cell's refractory rate, then scaled to meters per second. ``MOVE_MPS`` is
+that scale at a command of ±1. A paper held in front fills about 0.10 of
+each eye. ``BETA`` of 0.45 puts both of those currents just over threshold,
+so the paper crawls. A speck of 0.01 at the center stays under. The same
+speck at an edge is scaled with the other fractions. ``poster/draw_fig5.py``
+keeps 0.70 and its own wheel sum.
 
-``BLUE_FORWARD`` is less than one, so matched rates leave the red forward
-speed. ``RED_RADIUS`` is 0.20 m. At 0.10 m a diagonal red yawed out of the
-camera before the two halves could even out. ``BLUE_YAW`` is 18 and the
-rate filter is 50 ms, both hand-set. One new camera frame holds a current
-for about 0.1 s and then expansion drops to 0. Split across both wheels,
-3.6 turned that frame about 6° and 18 about 30°. Only the far wheel takes
-the blue term now, so the body turns about half of that, near 15°. The far
-wheel's reverse speed is the one the split law already used. The total
-angle scales with this coefficient. It is not a fit.
-``BILATERAL_RATIO`` is 0.25, also hand-set. When the weaker current is at
-least this fraction of the stronger, the blue yaw is 0. A factor between
-0 and 1 still turns, so the factor is only 0 or 1. A sheet on one eye
-stays under the fraction and keeps the yaw. ``BLUE_SHARE`` is 0.15,
-hand-set from a centered sheet whose mask was lopsided: both halves at or
-above that fill drop the blue yaw even when the weak current is still 0.
-A half under it, such as 0.46 against 0.05, keeps the yaw.
+``Plant`` smooths each wheel with time constant ``TAU_V``. ``wheel_speeds``
+itself is the instantaneous command, so a formula check does not depend on
+filter state. ``catch_up_steps`` turns a late camera tick into milliseconds
+of membrane time, and stops at ``CATCH_UP_S`` so one noisy frame cannot
+run the filter for seconds.
 
-Nothing is firing, so an empty frame and a subthreshold red both stop.
-Equal DNp01 rates cancel yaw. Both cells sit on the refractory ceiling once
-their current is well above 1, so matched looming on both sides has no yaw
-left and the negative forward term backs the car straight up. A shared
-sheet also drops the blue yaw while the rates are still unequal, so a
-near-frontal sheet holds still or backs up. One eye keeps a yaw. That yaw
-adds reverse on the far wheel, and the near wheel stays on the reverse
-path speed, so the car backs away without a wheel turning forward.
-
-The one hand-written exception is a safety stop. When both red halves are
+The one hand-written exception is a safety stop. When both eye ranges are
 at least ``RED_FILL``, both wheels are held at rest even though DNa02 is
-firing hard. A red that fills only one half still drives.
+firing. A red that fills only one range still drives.
+
+``blue_yaw_scale`` is still computed for the log. The wheels do not read it.
+``COUNT_FLOOR`` is the small-patch mark used by the color-threshold script
+and the face lamps. The membrane does not apply it.
 """
 
 from __future__ import annotations
@@ -57,14 +49,6 @@ from dataclasses import dataclass
 import numpy as np
 
 # Membrane time constants match research/notebooks/chemotaxis_sim.ipynb.
-# RED_REF does not. That notebook still divides red counts by 0.25.
-# A half-count equal to this is DNa02 current 1. Exactly 1 never spikes.
-# The reference matches COUNT_FLOOR, so a red the camera still counts can
-# fire. 0.04 is a few percent of one half: a small saturated patch drives.
-# The old 0.15 waited until the phone was close, and 0.25 left the
-# front-scene red (about 0.19 a side) silent. Blue is not a count. loom.py
-# turns angular size and expansion into the DNp01 current.
-RED_REF = 0.04
 TAU_MS = 5.0
 V_THRESHOLD = 1.0
 REFRAC_MS = 5.0
@@ -77,46 +61,201 @@ HOLD_STEPS = 20
 TAU_RATE_S = 0.050
 TRACK = 0.12
 
-# Counts. Independent of the synapse ratios above.
+# Safety stop. Both eye-range fractions at or above this hold the wheels.
 RED_FILL = 0.75
-# Half-frame counts below this are read as empty, before the currents.
-# Just above the saturated background of this room, so a small phone counts
-# and the dull red in the walls does not.
+# Small-patch mark for the color script and the face lamps. The membrane
+# does not treat a fraction below this as empty.
 COUNT_FLOOR = 0.04
 
-# Front red 0.45/0.45 saturates near 196 Hz a side. That sum is about 0.24 m/s.
-# FORWARD / (RED_YAW * YAW) is the turning radius while only one red cell
-# is firing. 0.20 m halves the yaw rate of the 0.10 m arc, which swung a
-# diagonal red out of the camera. The radius stays above TRACK/2, so both
-# wheels stay forward and the inner one runs at 0.7 times the path speed.
-# BLUE_YAW is 18. Split across both wheels, one 0.1 s frame near current
-# 1.8 turned about 30°, and 3.6 turned it about 6°. Body yaw is now half
-# of that split angle, because only the far wheel takes the blue term.
-# Hand-set, not a fit.
-# BLUE_FORWARD leaves forward speed when the rates match.
-FORWARD_PER_HZ = 0.0006
-YAW_PER_HZ = 0.0024
-BLUE_YAW = 18.0
-BLUE_FORWARD = 0.35
-# Hand-set. The weaker DNp01 current has to be under this fraction of the
-# stronger one for the blue yaw to stay on. At or above it, both eyes see
-# the sheet and the blue yaw is 0. See the module docstring.
+# n and c0 are the PN saturation. ALPHA matches the poster figures. BETA is
+# the live contralateral coefficient: a paper held in front fills about
+# 0.10 of each eye, 0.70 leaves that pair under threshold, and 0.45 puts
+# both currents just over 1. A 0.01 speck at the center stays under. The
+# same speck at an edge is scaled with the other fractions.
+# poster/draw_fig5.py keeps 0.70. One cell at the refractory rate is a
+# wheel command of ±1, and MOVE_MPS is the meters per second of that
+# command. FORWARD_PER_HZ is the poster's k in equations (17) and (18).
+# 0.0009 m/s per hertz is 1.5 times the previous 0.0006, so MOVE_MPS is
+# 0.15. RED_YAW is unchanged.
+N_ORN = 1.0
+C0 = 0.05
+ALPHA = 4.0
+BETA = 0.45
+# Radians per second for a red-concentration difference of 1, and the cap.
+# Log 20261108-133936 image 20261108-043944-047-1413 had red 0.00/0.017 at
+# place 0.97, so the scaled difference was 0.042. RED_YAW of 0.50 asked for
+# -0.02 rad/s, about 2 raw pulses, and the left-wheel hinge erased them.
+# 4.3 brings that sheet to the cap. The cap is 0.18 rad/s, about 10 pulses
+# of left lead after the hinge, and about 6° in one 0.6 s update. Equal
+# concentrations stay straight, and the forward speed stays the mean rate.
+# ``place`` is -1 at the left edge and +1 at the right edge, the poster's
+# p-hat. Both fractions are multiplied by 1 + KAPPA * |place| before the PN
+# and before this yaw. That is poster equation (5). The number stays out of
+# poster.md. An empty frame has place 0 so the factor is 1.
+RED_YAW = 4.3
+YAW_CAP = 0.18
+KAPPA = 1.5
+FORWARD_PER_HZ = 0.0009
+# Refractory period 5 ms plus the step that crosses threshold is 6 ms.
+FULL_RATE = 1.0 / 0.006
+MOVE_MPS = FORWARD_PER_HZ * FULL_RATE
+# Wheel command filter. Long enough that one spike does not reach the motor.
+TAU_V = 0.10
+# Seven wheel time constants. At MOVE_MPS 0.15 a full reverse falls through
+# the pulse floor in one late tick once the current is gone. Six constants
+# left a residual that the reverse shift sent as a start pulse. A longer
+# stall does not integrate a held current past this cap.
+CATCH_UP_S = 0.70
+
+
+def catch_up_steps(elapsed_s: float) -> int:
+    """Membrane steps for the wall time since the previous tick.
+
+    A tick on time stays at ``HOLD_STEPS``. A late tick follows the gap,
+    and a stall longer than ``CATCH_UP_S`` does not run past that cap.
+    """
+    span = min(max(float(elapsed_s), HOLD_STEPS * DT), CATCH_UP_S)
+    return max(1, int(round(span / DT)))
+
+
+# Logged only. The wheels ignore this gate. See blue_yaw_scale.
 BILATERAL_RATIO = 0.25
-# Hand-set. A centered sheet can still paint one half much more than the
-# other, and the weak eye's current then stays 0, so the ratio above never
-# opens. Both halves at or above this fill drop the blue yaw anyway.
-# 0.15 is the weak half of a frame that spun hard (0.51 against 0.15).
-# A weak half of 0.02 to 0.10 keeps the yaw.
 BLUE_SHARE = 0.15
-RED_RADIUS = 0.20
-RED_YAW = FORWARD_PER_HZ / (YAW_PER_HZ * RED_RADIUS)
 
 
-def present_count(count: float) -> float:
-    value = float(count)
-    if value < COUNT_FLOOR:
+def pn(concentration: float) -> float:
+    """PN saturation. A negative concentration is read as empty."""
+    c = max(float(concentration), 0.0)
+    return N_ORN * c / (N_ORN * c + C0)
+
+
+def concentration_gain(place: float) -> float:
+    """Poster factor on both eye fractions. 1 at the center, ``1 + KAPPA`` at an edge."""
+    span = abs(float(place))
+    if span > 1.0:
+        span = 1.0
+    return 1.0 + KAPPA * span
+
+
+def prime_concentration(
+    red_l: float, red_r: float, place: float = 0.0
+) -> tuple[float, float]:
+    """Eye fractions after the edge factor. An empty eye stays at 0."""
+    gain = concentration_gain(place)
+    return (gain * float(red_l), gain * float(red_r))
+
+
+def dna_current(
+    red_l: float, red_r: float, place: float = 0.0
+) -> tuple[float, float]:
+    """DNa02 current. Each side keeps its PN and subtracts the other.
+
+    ``place`` scales both fractions first. The center leaves them unchanged.
+    """
+    c_l, c_r = prime_concentration(red_l, red_r, place)
+    u_l = pn(c_l)
+    u_r = pn(c_r)
+    return (ALPHA * (u_l - BETA * u_r), ALPHA * (u_r - BETA * u_l))
+
+
+def red_fills_the_frame(red_l: float, red_r: float) -> bool:
+    """Safety stop. Both eye ranges covered, whatever the cells are doing."""
+    return min(float(red_l), float(red_r)) >= RED_FILL
+
+
+def blue_yaw_scale(
+    i_l: float,
+    i_r: float,
+    blue: tuple[float, float] = (0.0, 0.0),
+) -> float:
+    """1 when one eye owns the sheet, 0 when both eyes share it.
+
+    The log still prints this. The wheel command does not read it. Sharing
+    means the weaker current is at least ``BILATERAL_RATIO`` times the
+    stronger, or both blue fractions are at least ``BLUE_SHARE``.
+    """
+    left = max(float(i_l), 0.0)
+    right = max(float(i_r), 0.0)
+    stronger = max(left, right)
+    shared_current = stronger > 0.0 and min(left, right) / stronger >= BILATERAL_RATIO
+    shared_fill = min(max(float(blue[0]), 0.0), max(float(blue[1]), 0.0)) >= BLUE_SHARE
+    if shared_current or shared_fill:
         return 0.0
-    return value
+    return 1.0
+
+
+def wheel_speeds(
+    dna_l: float,
+    dna_r: float,
+    gf_l: float,
+    gf_r: float,
+    red_l: float = 0.0,
+    red_r: float = 0.0,
+    place: float = 0.0,
+) -> tuple[float, float, float, float]:
+    """Instantaneous path speed, body yaw, left wheel, and right wheel.
+
+    Forward speed is the mean of the two DNa02 rates. Yaw follows the
+    edge-scaled concentration ``c'_l - c'_r`` and stops at ``YAW_CAP``. The
+    heavier eye turns the heading toward itself and a one-eyed sheet does
+    not pivot. DNp01 stays on the opposite wheel and is not capped. Speeds
+    are meters per second. Positive yaw turns left. ``place`` is -1 at the
+    left edge and +1 at the right edge.
+    """
+    forward = 0.5 * (float(dna_l) + float(dna_r)) / FULL_RATE * MOVE_MPS
+    c_l, c_r = prime_concentration(red_l, red_r, place)
+    omega = (c_l - c_r) * RED_YAW
+    if omega > YAW_CAP:
+        omega = YAW_CAP
+    elif omega < -YAW_CAP:
+        omega = -YAW_CAP
+    half = omega * TRACK / 2.0
+    # A silent pair has no forward speed, so a concentration speck cannot spin.
+    # The yaw term also stays inside the forward speed, which keeps both
+    # wheels rolling the same way on red alone.
+    if half > forward:
+        half = forward
+    elif half < -forward:
+        half = -forward
+    v_left = forward - half - float(gf_r) / FULL_RATE * MOVE_MPS
+    v_right = forward + half - float(gf_l) / FULL_RATE * MOVE_MPS
+    speed = 0.5 * (v_left + v_right)
+    omega = (v_right - v_left) / TRACK
+    return speed, omega, v_left, v_right
+
+
+def speed_and_yaw(
+    dna_l: float,
+    dna_r: float,
+    gf_l: float,
+    gf_r: float,
+    red_l: float = 0.0,
+    red_r: float = 0.0,
+    place: float = 0.0,
+) -> tuple[float, float]:
+    """Forward speed in m/s and yaw in rad/s. Positive yaw turns left.
+
+    This is the instantaneous command. ``Plant`` smooths it with ``TAU_V``.
+    """
+    speed, omega, _left, _right = wheel_speeds(
+        dna_l, dna_r, gf_l, gf_r, red_l, red_r, place
+    )
+    return speed, omega
+
+
+def motion_mode(_speed: float, v_left: float, v_right: float) -> str:
+    """Label the wheels after the command. The label does not choose it.
+
+    One wheel at rest still counts. Opposite signs are a spin. Any reverse
+    wheel, including a single reversing wheel, is reverse.
+    """
+    if abs(v_left) < 1e-6 and abs(v_right) < 1e-6:
+        return "stop"
+    if v_left * v_right < 0.0:
+        return "spin"
+    if v_left < 0.0 or v_right < 0.0:
+        return "back"
+    return "cruise"
 
 
 class Lif:
@@ -145,104 +284,6 @@ class Lif:
         return self.v, spiked
 
 
-def dna_current(red_l: float, red_r: float) -> tuple[float, float]:
-    return (present_count(red_l) / RED_REF, present_count(red_r) / RED_REF)
-
-
-def red_fills_the_frame(red_l: float, red_r: float) -> bool:
-    """Safety stop. Both halves covered, whatever the cells are doing."""
-    return min(present_count(red_l), present_count(red_r)) >= RED_FILL
-
-
-def _loom_current(loom: tuple[float, float]) -> tuple[float, float]:
-    """DNp01 current passed in from ``flycar.loom``. Negative values are dropped."""
-    return (max(float(loom[0]), 0.0), max(float(loom[1]), 0.0))
-
-
-def blue_yaw_scale(
-    i_l: float,
-    i_r: float,
-    blue: tuple[float, float] = (0.0, 0.0),
-) -> float:
-    """1 when one eye owns the sheet, 0 when both eyes share it.
-
-    Sharing means the weaker current is at least ``BILATERAL_RATIO`` times
-    the stronger, or both half-fills are at least ``BLUE_SHARE``. With no
-    current and a one-sided fill the scale stays 1, and the rates are 0.
-    """
-    left = max(float(i_l), 0.0)
-    right = max(float(i_r), 0.0)
-    stronger = max(left, right)
-    shared_current = stronger > 0.0 and min(left, right) / stronger >= BILATERAL_RATIO
-    shared_fill = min(max(float(blue[0]), 0.0), max(float(blue[1]), 0.0)) >= BLUE_SHARE
-    if shared_current or shared_fill:
-        return 0.0
-    return 1.0
-
-
-def speed_and_yaw(
-    dna_l: float,
-    dna_r: float,
-    gf_l: float,
-    gf_r: float,
-    loom: tuple[float, float] = (0.0, 0.0),
-    blue: tuple[float, float] = (0.0, 0.0),
-) -> tuple[float, float]:
-    """Forward speed in m/s and yaw in rad/s. Positive yaw turns left.
-
-    Forward is the red sum minus a fraction of the DNp01 sum. A negative sum
-    reverses at the same coefficient, so matched looming on both sides backs
-    away even after the two cells have saturated and the yaw has cancelled.
-    Red yaw is the red difference. Blue yaw is the DNp01 difference, omitted
-    when ``blue_yaw_scale`` says both eyes share the sheet. The returned yaw
-    is the yaw the wheels make: red is applied to both, and blue only as
-    extra reverse on the wheel away from the stronger eye, so blue's share
-    of the body yaw is half of ``BLUE_YAW`` times the rate difference.
-    """
-    speed, omega, _left, _right = wheel_speeds(dna_l, dna_r, gf_l, gf_r, loom, blue)
-    return speed, omega
-
-
-def wheel_speeds(
-    dna_l: float,
-    dna_r: float,
-    gf_l: float,
-    gf_r: float,
-    loom: tuple[float, float] = (0.0, 0.0),
-    blue: tuple[float, float] = (0.0, 0.0),
-) -> tuple[float, float, float, float]:
-    """Return path speed, body yaw, left wheel, and right wheel.
-
-    Red yaw splits across the axle. Blue yaw only pushes the far wheel
-    backward: a right-hand DNp01 reverses the left wheel and leaves the
-    right wheel on the path speed. With no red, that path speed is reverse,
-    so the right wheel creeps backward and the left wheel reverses harder.
-    """
-    forward = (dna_l + dna_r) - BLUE_FORWARD * (gf_l + gf_r)
-    red_omega = RED_YAW * (dna_l - dna_r) * YAW_PER_HZ
-    blue_omega = BLUE_YAW * blue_yaw_scale(*loom, blue) * (gf_r - gf_l) * YAW_PER_HZ
-    speed = forward * FORWARD_PER_HZ
-    v_left = speed - red_omega * TRACK / 2
-    v_right = speed + red_omega * TRACK / 2
-    if blue_omega > 0.0:
-        v_left -= blue_omega * TRACK / 2
-    elif blue_omega < 0.0:
-        v_right -= -blue_omega * TRACK / 2
-    omega = (v_right - v_left) / TRACK
-    return speed, omega, v_left, v_right
-
-
-def motion_mode(speed: float, v_left: float, v_right: float) -> str:
-    """Label the wheels after the command. The label does not choose it."""
-    if abs(v_left) < 1e-6 and abs(v_right) < 1e-6:
-        return "stop"
-    if speed < 1e-6 and v_left * v_right < 0.0:
-        return "spin"
-    if v_left < 0.0 and v_right < 0.0:
-        return "back"
-    return "cruise"
-
-
 @dataclass
 class Step:
     mode: str
@@ -266,8 +307,11 @@ class Plant:
         self.x = 0.0
         self.y = 0.0
         self.heading = 0.0
+        self.wheel_left = 0.0
+        self.wheel_right = 0.0
         self._step_s = 0.0
         self._step_n = 0
+        self._wall = time.monotonic()
 
     def step(
         self,
@@ -276,14 +320,15 @@ class Plant:
         blue_l: float,
         blue_r: float,
         loom: tuple[float, float] = (0.0, 0.0),
+        place: float = 0.0,
     ) -> Step:
-        i_gf = _loom_current(loom)
-        i_dna = dna_current(red_l, red_r)
+        i_gf = (float(loom[0]), float(loom[1]))
+        i_dna = dna_current(red_l, red_r, place)
         self.gf_l.step(i_gf[0])
         self.gf_r.step(i_gf[1])
         self.dna_l.step(i_dna[0])
         self.dna_r.step(i_dna[1])
-        return self._emit(red_l, red_r, blue_l, blue_r, i_gf, DT)
+        return self._emit(red_l, red_r, DT, place)
 
     def steps(
         self,
@@ -291,27 +336,35 @@ class Plant:
         red_r: float,
         blue_l: float,
         blue_r: float,
-        n: int = HOLD_STEPS,
+        n: int | None = None,
         loom: tuple[float, float] = (0.0, 0.0),
+        place: float = 0.0,
     ) -> Step:
-        """Hold one frame for ``n`` milliseconds of membrane time.
+        """Hold one frame and advance the membranes by ``n`` milliseconds.
 
-        Red occupancy and the loom current are read once. Only the membranes
-        advance on each 1 ms tick. Forward speed, yaw, and the wheel speeds
-        are read once from the rates at the end of the window. ``blue_l`` and
-        ``blue_r`` do not drive DNp01.
+        ``n`` omitted follows the wall clock since the previous call, from
+        one 20 ms window up to ``CATCH_UP_S``. The app loop on the board
+        calls this without ``n``, and that loop is slower than 20 ms, so
+        the gap has to be read here. Red concentration and the loom current
+        are read once. ``blue_l`` and ``blue_r`` do not drive DNp01.
         """
+        began = time.monotonic()
+        if n is None:
+            n = catch_up_steps(began - self._wall)
+        self._wall = began
         if n < 1:
             raise ValueError("n must be at least 1")
-        began = time.monotonic()
-        i_gf = _loom_current(loom)
-        i_dna = dna_current(red_l, red_r)
+        i_gf = (float(loom[0]), float(loom[1]))
+        i_dna = dna_current(red_l, red_r, place)
+        step: Step | None = None
         for _ in range(n):
             self.gf_l.step(i_gf[0])
             self.gf_r.step(i_gf[1])
             self.dna_l.step(i_dna[0])
             self.dna_r.step(i_dna[1])
-        step = self._emit(red_l, red_r, blue_l, blue_r, i_gf, DT * n)
+            step = self._emit(red_l, red_r, DT, place)
+        if step is None:
+            raise RuntimeError("steps advanced no membrane time")
         self._step_s += time.monotonic() - began
         self._step_n += 1
         return step
@@ -325,28 +378,30 @@ class Plant:
         self._step_n = 0
         return mean
 
-    def _emit(
-        self,
-        red_l: float,
-        red_r: float,
-        blue_l: float,
-        blue_r: float,
-        loom: tuple[float, float],
-        dt: float,
-    ) -> Step:
+    def _emit(self, red_l: float, red_r: float, dt: float, place: float = 0.0) -> Step:
         if red_fills_the_frame(red_l, red_r):
+            self.wheel_left = 0.0
+            self.wheel_right = 0.0
             speed = 0.0
             omega = 0.0
             v_left, v_right = 0.0, 0.0
         else:
-            speed, omega, v_left, v_right = wheel_speeds(
+            _speed, _omega, target_left, target_right = wheel_speeds(
                 self.dna_l.rate,
                 self.dna_r.rate,
                 self.gf_l.rate,
                 self.gf_r.rate,
-                loom,
-                (blue_l, blue_r),
+                red_l,
+                red_r,
+                place,
             )
+            follow = dt / TAU_V
+            self.wheel_left += follow * (-self.wheel_left + target_left)
+            self.wheel_right += follow * (-self.wheel_right + target_right)
+            v_left = self.wheel_left
+            v_right = self.wheel_right
+            speed = 0.5 * (v_left + v_right)
+            omega = (v_right - v_left) / TRACK
         mode = motion_mode(speed, v_left, v_right)
         self.x += speed * float(np.cos(self.heading)) * dt
         self.y += speed * float(np.sin(self.heading)) * dt

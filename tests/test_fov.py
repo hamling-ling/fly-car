@@ -6,8 +6,8 @@ Run from the repository root:
 
 The notebook writes the same initial conditions out so they can be edited.
 This test keeps the reference scene: a red sphere starts on the right, the
-car turns right, and it stops near the horizontal center while the blue
-sphere stays outside the frame.
+car turns right, and it crawls until both eye ranges fill. The blue sphere
+stays outside the frame. The crawl reaches that fill after the 8 s default.
 """
 
 from __future__ import annotations
@@ -43,34 +43,48 @@ def test_notebook_scene_matches_the_default():
     assert notebook_scene() == Scene()
 
 
-def test_reference_red_starts_on_the_right_and_stops_centered():
+def test_reference_red_turns_right_then_crawls():
+    """右の赤へ頭を向け、そのあと両輪で這う。8 秒では範囲が 0.75 に届かない。"""
     run = simulate(notebook_scene())
     first = run.samples[0]
     assert first.heading == pytest.approx(0.0)
     assert first.red.inside
     assert first.red.nx == pytest.approx(0.6479331048207451)
     assert first.red.nx > 0.4
+    assert first.red.right > first.red.left
     assert not any(sample.blue.inside for sample in run.samples)
+    assert min(sample.heading for sample in run.samples) < -0.15
+    early = run.samples[5]
+    assert early.v_left > early.v_right
+    # The turn keeps bringing the blob toward center. Both wheels are
+    # already forward, and the 0.75 fill is still ahead.
+    crawling = [sample for sample in run.samples if sample.t > 1.0]
+    assert crawling
+    assert all(sample.v_left > 0.0 and sample.v_right > 0.0 for sample in crawling)
+    assert all(sample.red.inside and sample.red.nx > -0.05 for sample in crawling)
+    assert min(sample.red.nx for sample in crawling) < 0.20
+    assert all(sample.mode != "stop" for sample in run.samples)
+    assert "停止せず" in str(run)
+    assert "青は画面の外のまま" in str(run)
 
-    centered = [
-        sample
-        for sample in run.samples
-        if sample.red.inside and abs(sample.red.nx) < 0.05
-    ]
-    assert centered
+
+def test_reference_red_stops_when_both_ranges_fill():
+    """左右の範囲が 0.75 に届いて止まるのは 9.2 秒付近で、頭は右を向いている。"""
+    scene = Scene(
+        cam_h=0.15,
+        pitch_deg=12.0,
+        red=Blob((1.30, -0.40), 0.12),
+        blue=Blob((0.25, 0.90), 0.10),
+        run_s=32.0,
+    )
+    run = simulate(scene)
     stops = [sample for sample in run.samples if sample.mode == "stop"]
     assert stops
-    # 発火率の時定数を 50 ms にしたので、赤への加速が早く、停止は 4.66 秒。
-    assert stops[0].t == pytest.approx(4.66)
-    assert stops[0].red.left >= 0.75
-    assert stops[0].red.right >= 0.75
-    assert abs(stops[0].red.nx) < 0.1
-    assert min(sample.heading for sample in run.samples) < -0.15
-    cruise = [sample for sample in run.samples if sample.mode == "cruise"]
-    assert cruise
-    assert all(sample.v_left > 0.0 and sample.v_right > 0.0 for sample in cruise)
-    assert "停止" in str(run)
-    assert "青は画面の外のまま" in str(run)
+    stop = stops[0]
+    assert stop.t == pytest.approx(9.18, abs=0.04)
+    assert stop.red.left >= 0.75
+    assert stop.red.right >= 0.75
+    assert stop.heading < -0.15
 
 
 def test_empty_view_stays_put():
@@ -91,23 +105,22 @@ def test_static_blue_on_the_right_does_not_move():
     assert all(sample.i_gf[0] < 1.0 and sample.i_gf[1] < 1.0 for sample in run.samples)
 
 
-def test_cruise_past_a_side_blue_yaws_a_little_and_still_stops_on_the_red():
-    """10 cm の青を巡航で横から見ると右の電流が 1 を超え、約 20° 左へ寄る。
-
-    球の表面からは約 4 cm 離れて通り、正面の赤で止まる。
-    """
+def test_a_side_blue_yaws_the_nose_then_the_crawl_continues():
+    """横の青のそばを這うと視角が広がって頭が一度それ、球には触らず赤へ進む。"""
     red = Blob((1.30, 0.00), 0.12)
     blue = Blob((0.45, -0.08), 0.10)
-    run = simulate(Scene(red=red, blue=blue, run_s=8.0))
-    assert max(sample.i_gf[1] for sample in run.samples) > 1.0
-    assert max(sample.heading for sample in run.samples) > 0.15
-    assert max(sample.heading for sample in run.samples) < 0.55
+    run = simulate(Scene(red=red, blue=blue, run_s=10.0))
+    assert max(sample.heading for sample in run.samples) > 0.10
+    assert min(sample.heading for sample in run.samples) > -0.10
+    assert abs(run.samples[-1].heading) < 0.10
+    assert run.samples[-1].x > 0.2
+    assert any(sample.mode == "cruise" for sample in run.samples)
+    assert run.samples[-1].mode == "stop"
+    assert run.samples[-1].red.left >= 0.75
+    assert run.samples[-1].red.right >= 0.75
+    assert max(max(sample.i_gf) for sample in run.samples) > 1.0
     dist = [((s.x - 0.45) ** 2 + (s.y + 0.08) ** 2) ** 0.5 for s in run.samples]
-    assert blue.radius < min(dist) < blue.radius + 0.06
-    stops = [sample for sample in run.samples if sample.mode == "stop"]
-    assert stops
-    assert stops[0].red.left >= 0.75
-    assert stops[0].red.right >= 0.75
+    assert min(dist) > blue.radius
 
 
 def test_left_red_turns_left_without_a_blue_sphere():
@@ -129,7 +142,15 @@ def test_steep_pitch_puts_the_reference_red_outside_the_frame():
 
 
 def test_figures_cover_the_reference_scene():
-    run = simulate(notebook_scene())
+    run = simulate(
+        Scene(
+            cam_h=0.15,
+            pitch_deg=12.0,
+            red=Blob((1.30, -0.40), 0.12),
+            blue=Blob((0.25, 0.90), 0.10),
+            run_s=32.0,
+        )
+    )
     fig, anim = animate(run)
     _finish(anim)
     fig.canvas.draw()

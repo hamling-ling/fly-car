@@ -1,40 +1,27 @@
-"""DNp01 current from angular size and expansion.
+"""DNp01 current from the blue columns on each eye.
 
-LC4 follows expansion through a sigmoid. LPLC2 follows angular size through
-a Gaussian peaked at 40°. A cell contributes its chemical synapse count onto
-the ipsilateral DNp01, multiplied by the fraction of its columns on blue
-pixels, and the side is divided by that side's total LC4 + LPLC2 count. A
-geometric disk, with no mask, still counts columns inside the equal-area
-circle.
+Each cell reads the vertical blue fraction of the image column at its
+stretched screen position. The stretch keeps the outer edge fixed and lands
+the old midline at the far side of the overlap, the same rule as the poster.
+LC4 multiplies that fraction by the expansion sigmoid. LPLC2 multiplies it
+by 1 while the angle is expanding and by 0 otherwise. Expansion below
+0.10 rad/s counts as not expanding. Each side is divided by that cell type's own ipsilateral synapse
+sum, then scaled by ``ALPHA``.
 
-The Gaussian peak 40° and width 20° are the hand-set values from
-``research/notebooks/loom_sigmoid.ipynb``. That notebook scales the sum by
-80/50. This car uses 100/50, so the leading factor is 2.0. A frontal card
-that reached about 0.98 under 80/50 reaches about 1.22 here. The sigmoid
-in the notebook is centered at 8 rad/s. This camera clips a blue card once
-it fills the frame, so a hand can only produce about 1 rad/s. The center
-here is 0.20 rad/s and the width is 0.10 rad/s. The LC4 term is then
-multiplied by 6. Five let a frontal sheet of about 22° at 0.4 rad/s cross
-threshold. Six also lets the weak side of a hand-aimed sheet fire, where
-about 14% of that eye's columns sit on blue pixels. A static disk on one
-eye is unchanged, because that factor multiplies expansion only. A stopped sheet
-that both eyes carry, about 38° and closer, multiplies the size term by
-``LPLC2_SHARE``. None of these is a fit. LPLC2 on one eye still cannot
-fill the denominator.
+The sigmoid center 0.20 rad/s and width 0.10 rad/s, ``K_S``, and ``ALPHA``
+are the numbers that produced the three poster figures. A logistic centered
+at 8 rad/s leaves 0–1 rad/s, which is what this camera can show, on the
+tail, so an expanding sheet would not cross threshold. These are a starting
+point. ``1/w`` is the reciprocal of the width inside the exponential.
+``K_S`` and ``ALPHA`` are coefficients.
 
 The camera estimates one disk from the largest blue region. Angular size is
-the equal-area circle of those pixels on the camera's tangent plane.
-Expansion is the increase in that angle since the previous frame that also
-saw a region. A region that appears, or one that shrinks, contributes no
-expansion. Which columns fire is separate from the circle. LPLC2 counts a
-column when its pixel is blue. LC4 does too, unless the largest region is
-roughly centered: the weaker side of its pixels, split at the middle of the
-frame, is at least ``CENTER_RATIO`` of the stronger side. Then LC4 ignores
-the pixels and counts columns in a fixed band, the middle ±2σ of image
-``u``. σ is ``CENTER_SIGMA``. The careful off-center sheet at ``u = 0.611``
-is 1σ, so the band runs from 0.278 to 0.722. A region that fails the ratio
-keeps the pixel count, and a one-sided sheet still drives one eye. Columns
-come from ``loom_cells.npz``, built by ``scripts/export_loom_cells.py``.
+the equal-area circle of those pixels. Expansion is the increase in that
+angle since the previous frame that also saw a region. A region that
+appears, or one that shrinks, contributes no expansion. With a mask, the
+column fractions come from that mask. Without one, the disk is drawn as an
+ellipse on a small raster and read the same way. Columns come from
+``loom_cells.npz``, built by ``scripts/export_loom_cells.py``.
 """
 
 from __future__ import annotations
@@ -45,33 +32,26 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-R_MAX = 100.0
-R_REF = 50.0
-SCALE = R_MAX / R_REF
-SIZE_PEAK_DEG = 40.0
-SIZE_SIGMA_DEG = 20.0
-EARLY_MID = 0.20
-EARLY_WIDTH = 0.10
-# Hand-set. Five times the LC4 term lets a frontal 22° sheet at 0.4 rad/s
-# reach threshold. Six times lets the weak side of a hand-aimed sheet fire:
-# about 14% of that eye's columns sit on blue pixels, and the equal-area
-# circle scores that side under 1. The size term is not scaled.
-LC4_GAIN = 6.0
-# Hand-set. A stopped sheet filling the frame is about 0.7 a side, under
-# threshold, so the firing dies and the reverse pulse stays under -36.
-# Three times the size term, once both eyes are at or above ``SIZE_BOTH``,
-# puts that sheet near 2. Both wheels then clear the reverse floor.
-# One eye stays under threshold. About 38° is the nearest sheet this catches.
-LPLC2_SHARE = 3.0
-SIZE_BOTH = 0.5
+# Eye ranges on p, the poster horizontal coordinate. 0 is the left edge.
+LEFT_HI = 0.65
+RIGHT_LO = 0.35
+# Lateral edge stays fixed. The anatomical midline lands at LEFT_HI.
+STRETCH = LEFT_HI / 0.5
+# Poster-figure starting point. See the module docstring.
+K_S = 1.0
+SIGMOID_MID = 0.20
+SIGMOID_WIDTH = 0.10
+# Angle noise on a still sheet is a few hundredths of a rad/s. Below this
+# the size term stays off. A hand pushing the sheet at 0.2 rad/s still
+# passes. Kept separate from SIGMOID_WIDTH so retuning the logistic does
+# not move the noise floor.
+EXPANSION_FLOOR = 0.10
+ALPHA = 4.0
+# Raster used when a caller has a disk and no camera mask.
+RASTER_H = 180
+RASTER_W = 320
 # Specks smaller than this fraction of the frame are not a disk.
 BLUE_MIN_FRACTION = 0.002
-# Image u. A sheet held carefully at the middle landed at 0.611, which is
-# 0.111 right of center. That offset is 1σ. ±2σ is the LC4 band below.
-CENTER_SIGMA = 0.111
-# Weaker side of the largest region, as a fraction of the stronger side.
-# At or above this, the sheet is roughly centered and LC4 uses the band.
-CENTER_RATIO = 0.25
 
 CELLS_PATH = Path(__file__).with_name("loom_cells.npz")
 
@@ -84,26 +64,43 @@ def camera_tangents(dfov_deg: float = 58.0, aspect: float = 16 / 9) -> tuple[flo
     return float(horizontal), float(vertical)
 
 
-def center_band() -> tuple[float, float]:
-    """Image ``u`` interval whose LC4 columns a centered sheet stimulates.
+def expansion(theta_dot: float) -> float:
+    """Sigmoid of expansion. About 0.12 at rest, near 1 once ``theta_dot`` is large."""
+    return K_S / (1.0 + np.exp(-(float(theta_dot) - SIGMOID_MID) / SIGMOID_WIDTH))
 
-    The interval is the middle ±2σ. σ is the careful off-center offset.
+
+def size_term(theta: float, theta_dot: float) -> float:
+    """Size weight g(θ). 1 while the angle is expanding, otherwise 0.
+
+    The poster does not give g(θ) a peak. ``theta`` stays in the signature
+    because the weight is g(θ), and the value does not depend on the angle.
     """
-    half = 2.0 * CENTER_SIGMA
-    return 0.5 - half, 0.5 + half
+    del theta
+    if float(theta_dot) < EXPANSION_FLOOR:
+        return 0.0
+    return 1.0
 
 
-def anchored_sigmoid(theta_dot: float, mid: float = EARLY_MID, width: float = EARLY_WIDTH) -> float:
-    """Zero at no expansion, one at high expansion."""
-    raw = 1.0 / (1.0 + np.exp(-(theta_dot - mid) / width))
-    raw0 = 1.0 / (1.0 + np.exp(mid / width))
-    return float((raw - raw0) / (1.0 - raw0))
+def widen(u: np.ndarray) -> np.ndarray:
+    """Stretch each eye from its lateral edge onto the overlapping ranges."""
+    anatomical = np.asarray(u, dtype=np.float64)
+    out = np.empty(anatomical.shape, dtype=np.float64)
+    left = anatomical <= 0.5
+    out[left] = anatomical[left] * STRETCH
+    out[~left] = 1.0 - (1.0 - anatomical[~left]) * STRETCH
+    return out
 
 
-def size_gain(theta: float) -> float:
-    """One at 40° full angle. ``theta`` is radians."""
-    deg = float(np.rad2deg(theta))
-    return float(np.exp(-0.5 * ((deg - SIZE_PEAK_DEG) / SIZE_SIGMA_DEG) ** 2))
+def raster(disk: "Disk", height: int = RASTER_H, width: int = RASTER_W) -> np.ndarray:
+    """Boolean ellipse of ``disk`` on a small image. An empty disk stays empty."""
+    mask = np.zeros((height, width), dtype=bool)
+    if disk.ru <= 1e-8 or disk.rv <= 1e-8:
+        return mask
+    u = (np.arange(width) + 0.5) / width
+    v = (np.arange(height) + 0.5) / height
+    uu, vv = np.meshgrid(u, v)
+    mask[:] = ((uu - disk.cu) / disk.ru) ** 2 + ((vv - disk.cv) / disk.rv) ** 2 <= 1.0
+    return mask
 
 
 @dataclass(frozen=True)
@@ -136,27 +133,15 @@ class Population:
             [float(self.w[self.side == code].sum()) for code in (0, 1)],
             dtype=np.float64,
         )
+        # Synapse-weighted mean of anatomical u, then the poster stretch.
+        total = np.add.reduceat(self.n * self.u, self.starts)
+        self.p = widen(total / self.cell_n)
 
-    def covered(self, disk: Disk) -> np.ndarray:
-        """Return ``sum f_i w_i`` for the left and the right eye."""
-        if disk.ru <= 1e-8 or disk.rv <= 1e-8:
-            return np.zeros(2, dtype=np.float64)
-        du = (self.u - disk.cu) / disk.ru
-        dv = (self.v - disk.cv) / disk.rv
-        inside = ((du * du + dv * dv) <= 1.0).astype(np.float64)
-        return self._weighted(inside)
+    def column_drive(self, mask: np.ndarray) -> np.ndarray:
+        """Return F for the left and the right eye.
 
-    def in_band(self, lo: float, hi: float) -> np.ndarray:
-        """Return ``sum f_i w_i`` for columns with image ``u`` in ``[lo, hi]``."""
-        inside = ((self.u >= lo) & (self.u <= hi)).astype(np.float64)
-        return self._weighted(inside)
-
-    def painted(self, mask: np.ndarray) -> np.ndarray:
-        """Return ``sum f_i w_i`` for columns whose pixel is set.
-
-        ``mask`` is a boolean image in the same frame as ``u`` and ``v``.
-        A column counts when that pixel is set, whether or not it lies
-        inside the equal-area circle.
+        ``f_i`` is the vertical mean of ``mask`` at the cell's screen column.
+        The side sum of ``w_i f_i`` is divided by that side's synapse total.
         """
         image = np.asarray(mask)
         if image.ndim != 2:
@@ -164,18 +149,16 @@ class Population:
         height, width = image.shape
         if height == 0 or width == 0 or not np.any(image):
             return np.zeros(2, dtype=np.float64)
-        ui = np.clip(np.rint(self.u * width - 0.5).astype(np.int64), 0, width - 1)
-        vi = np.clip(np.rint(self.v * height - 0.5).astype(np.int64), 0, height - 1)
-        inside = np.asarray(image[vi, ui], dtype=np.float64)
-        return self._weighted(inside)
-
-    def _weighted(self, inside: np.ndarray) -> np.ndarray:
-        covered_n = np.add.reduceat(self.n * inside, self.starts)
-        frac = covered_n / self.cell_n
+        columns = np.asarray(image, dtype=np.float64).mean(axis=0)
+        ui = np.clip(np.rint(self.p * width - 0.5).astype(np.int64), 0, width - 1)
+        covered = columns[ui]
         out = np.zeros(2, dtype=np.float64)
         for code in (0, 1):
             chosen = self.side == code
-            out[code] = float(frac[chosen] @ self.w[chosen])
+            total = float(self.side_sum[code])
+            if total <= 0.0:
+                continue
+            out[code] = float(covered[chosen] @ self.w[chosen] / total)
         return out
 
 
@@ -196,29 +179,18 @@ class Cells:
         theta_dot: float,
         mask: np.ndarray | None = None,
     ) -> tuple[float, float]:
-        """DNp01 current on the left and the right. Expansion below zero is ignored.
+        """DNp01 current on the left and the right.
 
-        With ``mask``, LPLC2 counts a column when its pixel is set. LC4 does
-        the same unless ``roughly_centered`` says the largest region sits on
-        both sides of the middle. Then LC4 counts the fixed ±2σ band instead.
-        Without a mask, columns inside the disk's circle count, which is the
-        geometric case.
+        ``mask`` supplies the blue pixels. Without it, the disk's ellipse is
+        rasterized and read the same way. Angle and expansion still come from
+        ``disk`` and ``theta_dot``.
         """
-        speed = anchored_sigmoid(max(float(theta_dot), 0.0))
-        gain = size_gain(disk.theta)
-        if mask is None:
-            lc4 = self.lc4.covered(disk)
-            lplc = self.lplc2.covered(disk)
-        elif roughly_centered(mask):
-            lc4 = self.lc4.in_band(*center_band())
-            lplc = self.lplc2.painted(mask)
-        else:
-            lc4 = self.lc4.painted(mask)
-            lplc = self.lplc2.painted(mask)
-        size = SCALE * (gain * lplc) / self.side_ref
-        if float(np.min(size)) >= SIZE_BOTH:
-            size = size * LPLC2_SHARE
-        drive = SCALE * (LC4_GAIN * speed * lc4) / self.side_ref + size
+        speed = expansion(theta_dot)
+        gain = size_term(disk.theta, theta_dot)
+        image = raster(disk) if mask is None else mask
+        lc4 = self.lc4.column_drive(image)
+        lplc = self.lplc2.column_drive(image)
+        drive = ALPHA * (speed * lc4 + gain * lplc)
         return float(drive[0]), float(drive[1])
 
 
@@ -288,26 +260,6 @@ def _largest_component(mask: np.ndarray) -> tuple[np.ndarray, np.ndarray, int] |
     return ys, xs, int(image.shape[1])
 
 
-def roughly_centered(mask: np.ndarray) -> bool:
-    """True when the largest region puts mass on both sides of the middle.
-
-    Pixels are split at image ``u = 0.5``. The weaker count has to be at
-    least ``CENTER_RATIO`` times the stronger count. A region on one side
-    returns False, and so does a speck.
-    """
-    found = _largest_component(mask)
-    if found is None:
-        return False
-    _ys, xs, width = found
-    u = (xs.astype(np.float64) + 0.5) / width
-    left = float(np.count_nonzero(u < 0.5))
-    right = float(np.count_nonzero(u > 0.5))
-    stronger = max(left, right)
-    if stronger <= 0.0:
-        return False
-    return min(left, right) / stronger >= CENTER_RATIO
-
-
 def measure_blue(mask: np.ndarray) -> Disk | None:
     """Fit one disk to the largest blue region in a boolean image.
 
@@ -358,8 +310,8 @@ class LoomTrack:
     ) -> tuple[float, float]:
         """Return the DNp01 currents for this disk at time ``now`` in seconds.
 
-        ``mask`` selects columns by blue pixels. Angle and expansion still
-        come from ``disk``.
+        ``mask`` selects the blue columns. Angle and expansion still come
+        from ``disk``.
         """
         if disk is None:
             self.theta = 0.0

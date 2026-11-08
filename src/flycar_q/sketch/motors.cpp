@@ -8,7 +8,9 @@
 
 static const int RIGHT_MOTOR_PIN = 3;
 static const int LEFT_MOTOR_PIN = 5;
-static const unsigned long WATCHDOG_MS = 450;
+// 青の計測は 1 秒近くかかる。そのあいだ、来ているパルスはそのまま出す。
+// Python が止まったときは 3 秒で車輪を止める。
+static const unsigned long WATCHDOG_MS = 3000;
 
 // 左モーターの +/- は逆つなぎ。正の指令は左右とも 1500 µs より長くする。
 // 反時計回りだけ広げる倍率は掛けない。

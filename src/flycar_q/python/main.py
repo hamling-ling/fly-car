@@ -1,7 +1,8 @@
-"""20 ms ごとに膜を進め、10 Hz で占有と青の loom を取り直す。
+"""膜を実時間ぶん進め、10 Hz で占有と青の loom を取り直す。
 
-パルスの引数はスケッチと同じく右、左。カメラの読み出しは別スレッドで、
-ここは最新の 1 枚だけを見る。
+間隔が 0.02 秒なら 20 ms 分である。遅れた更新は開いた時間ぶん、
+ただし 0.70 秒まで進める。パルスの引数はスケッチと同じく右、左。
+カメラの読み出しは別スレッドで、ここは最新の 1 枚だけを見る。
 """
 
 from __future__ import annotations
@@ -14,7 +15,7 @@ bootstrap.install()
 
 from arduino.app_utils import App, Bridge
 
-from flycar.behavior import Plant, blue_yaw_scale
+from flycar.behavior import Plant, blue_yaw_scale, catch_up_steps
 from flycar.occupancy import Counts
 from flycar.pulse import wheel_pulses
 
@@ -39,11 +40,8 @@ def publish_face(
 ) -> None:
     """Push one frame. A Bridge failure leaves the wheels on their last command."""
     right, left = sent
-    see_red, see_blue, go_forward, go_back = lamps(
-        red_l, red_r, blue_l, blue_r, right, left
-    )
     _call("showFace", frame(red_l, red_r, blue_l, blue_r, right, left, mode))
-    _call("showLamps", see_red, see_blue, go_forward, go_back)
+    _call("showLamps", *lamps(red_l, red_r, blue_l, blue_r, right, left))
 
 
 def _call(name: str, *args: object) -> None:
@@ -82,6 +80,7 @@ def loop() -> None:
         last_sent = (0, 0)
         last_mode = "stop"
         last_mark: tuple[object, ...] | None = None
+        last_step = time.monotonic()
         while True:
             now = time.monotonic()
             counted = False
@@ -94,7 +93,9 @@ def loop() -> None:
                         last_sent = stopped
                         last_mode = "stop"
             if next_tick.tick(now):
-                step = plant.steps(*counts.values, loom=counts.loom)
+                n = catch_up_steps(now - last_step)
+                last_step = now
+                step = plant.steps(*counts.values, loom=counts.loom, n=n, place=counts.place)
                 sent = send(*wheel_pulses(step.v_left, step.v_right))
                 if sent is not None:
                     last_sent = sent
@@ -142,7 +143,7 @@ def loop() -> None:
                         if heartbeat:
                             line += (
                                 f"  cam {eye.fps():.1f} fps  "
-                                f"steps {plant.mean_ms():.2f} ms"
+                                f"steps {plant.mean_ms():.2f} ms  n {n}"
                             )
                         if active or max(counts.values) >= 0.002:
                             name = shots.save(held, held_seen)
