@@ -2,6 +2,94 @@
 
 Uno Q に載せる本番のアプリ。最新のフレームを左右の眼として読み、赤には近づき、広がる青からは下がる。膜と車輪のフィルタは `Plant.steps` が進める。色を数える周期と膜を進める周期は分かれていて、遅れた更新は開いた時間ぶん、上限まで進む。係数は `src/flycar/behavior.py` と `src/flycar/loom.py` の先頭にある。
 
+## コンポーネント
+
+車は Arduino UNO Q を中心に、カメラと車輪を別の電源でつなぐ。UNO Q の USB-C は ASUS の USB Type-C ハブにつながる。モバイルバッテリーはハブの Power Delivery 入力に刺さり、ハブが UNO Q、Brio 100、自分に給電する。Brio 100 はハブの USB に刺さる。UNO Q はハブへ給電しない。USB-C が一つで、電源とカメラを同じ口に載せるからである。PC に刺したデバイスモードではカメラは列挙されない。ホストのバスが空だからである。
+
+車輪は秋月電子通商の 2WD Mini Robot Mobile Platform Kit の部品である。FEETECH FT-SMC-2CH が二つの FEETECH FM90 を回す。UNO Q から FT-SMC-2CH へは、右の信号 D3、左の信号 D5、GND をつなぐ。単三乾電池 4 本がこのコントローラの電源である。UNO Q の 5 V は使わない。モーターの電流を UNO Q から取らないからである。左の FM90 はプラスとマイナスを逆につないである。
+
+```mermaid
+flowchart TB
+  pack["モバイルバッテリー"]
+  hub["ASUS USB Type-C Hub"]
+  brio["Logitech Brio 100"]
+  uno["Arduino UNO Q"]
+  aa["単三乾電池 4 本"]
+  smc["FEETECH FT-SMC-2CH"]
+  right["FEETECH FM90（右）"]
+  left["FEETECH FM90（左）"]
+
+  pack -->|給電| hub
+  brio -->|USB| hub
+  hub -->|USB-C。電源とホスト| uno
+  aa -->|電源| smc
+  uno -->|右の信号 D3| smc
+  uno -->|左の信号 D5| smc
+  uno -->|GND| smc
+  smc -->|出力| right
+  smc -->|プラスとマイナスは逆| left
+```
+
+部品は次のとおりである。
+
+| 部品 | 数量 | 備考 |
+| --- | --- | --- |
+| Arduino UNO Q | 1 | |
+| Logitech Brio 100 | 1 | USB Web カメラ |
+| ASUS USB Type-C Hub | 1 | |
+| FEETECH FT-SMC-2CH | 1 | 秋月電子通商の 2WD Mini Robot Mobile Platform Kit |
+| FEETECH FM90| 2 | 秋月電子通商の 2WD Mini Robot Mobile Platform Kit |
+| モバイルバッテリー | 1 | |
+| 単三乾電池 | 4 | |
+
+## ソフトウェア
+
+ソフトウェアは Arduino UNO Q の中で、MPU の Python と MCU のスケッチに分かれる。図は、この機能の粒度のクラス図である。Color、Loom、Plant、Pulses は `flycar` にあり、同じ Python が import する。Camera と Face はアプリにある。黒ひし形の実線はコンポジションで、Color が Loom を一つ持つ。破線は依存で、使う側から使われる側へ向く。Bridge はアプリからスケッチへの依存である。`flycar` の関数は Bridge を呼ばない。パルスを `setMotorSpeed` に渡すのはアプリだからである。Camera、Color、Plant を結ぶ関連は無い。ループが三つを並べて持つだけで、互いのフィールドには入らないからである。視野のシミュレーションは載せない。ノートの計算で、車は呼ばないからである。
+
+```mermaid
+classDiagram
+  direction TB
+
+  namespace MPU {
+    class Camera
+    class Face
+  }
+  namespace MPU.flycar {
+    class Color
+    class Loom
+    class Plant
+    class Pulses
+  }
+  namespace MCU {
+    class Motors
+    class Matrix
+    class Lamps
+  }
+  Color "1" *-- "1" Loom
+  Color ..> Camera
+  Plant ..> Color
+  Pulses ..> Plant
+  Face ..> Color
+  Face ..> Pulses
+  Pulses ..> Motors : Bridge
+  Face ..> Matrix : Bridge
+  Face ..> Lamps : Bridge
+```
+
+各クラスの役割は次のとおりである。
+
+| クラス | 役割 |
+| --- | --- |
+| Camera | 最新の 1 枚を置く |
+| Color | 左右の眼の赤と青を数える |
+| Loom | 青の拡大から電流を出す |
+| Plant | 膜と車輪のフィルタを進める |
+| Pulses | 速さをパルスにする |
+| Face | 絵とランプの色を決める |
+| Motors | パルスを車輪に書く |
+| Matrix | 点マトリクスを灯す |
+| Lamps | RGB を灯す |
+
 ## データフロー
 
 このアプリは、最新の 1 枚から左右の眼の範囲の色を読む。範囲は中央で重なる。左の範囲は左端から重なりの先まで、右の範囲は重なりの手前から右端までである。画素の位置は左端から右端へ進む。赤の濃度は、その範囲にある赤の割合である。赤の画素が画面の端に寄るほど、左右の割合に同じ倍率を掛けた値をその濃度にする。中央では倍率は 1 で、割合はそのままである。青は、各細胞の画面位置にある縦一列の青の割合である。細胞の位置は、外側の端を固定して各眼の範囲を中央の向こうまで伸ばしたあとの位置である。細胞はまとめない。重みは細胞ごとのシナプス数のままである。
@@ -60,6 +148,47 @@ flowchart TB
 ```
 
 絵が無い周回は `setMotorSpeed(0, 0)` を送り、膜は前の占有のまま進む。顔は占有を取り直した周回だけ出す。
+
+## シーケンス
+
+`main.loop` は `while True` で、色の周期と膜の周期を回す。二つの時計は別である。膜の周期は直前の Color を Plant に渡す。顔は占有を取り直した周回だけ出す。`flycar` は Bridge を呼ばない。パルスと絵をスケッチへ渡すのはこのループである。
+
+```mermaid
+sequenceDiagram
+  participant App
+  participant Camera
+  participant Color
+  participant Loom
+  participant Plant
+  participant Pulses
+  participant Face
+  participant Motors
+  participant Matrix
+  participant Lamps
+
+  loop main.loop
+  opt count period
+    App->>Camera: shot
+    Camera-->>App: frame
+    App->>Color: update
+    Color->>Loom: update
+    Loom-->>Color: current
+  end
+  opt membrane period
+    App->>Plant: steps
+    Plant-->>App: speeds
+    App->>Pulses: wheel_pulses
+    Pulses-->>App: pulses
+    App->>Motors: setMotorSpeed
+  end
+  opt new count
+    App->>Face: frame and lamps
+    Face-->>App: picture
+    App->>Matrix: showFace
+    App->>Lamps: showLamps
+  end
+  end
+```
 
 ## 動かし方
 
