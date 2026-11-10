@@ -251,6 +251,11 @@ $$
 
 ![実機。接近、正面からの後退、横からの後退のカメラと左右の車輪の駆動方向](fig4_wheels.png)
 
+動画
+
+[![A Robot Using Fly Brain Cells to Approach and Dodge ](./top.png)](https://www.youtube.com/watch?v=30UnHq7dWzU "A Robot Using Fly Brain Cells to Approach and Dodge ")
+
+
 ## 付録　視角 $\theta$ の計算
 
 $\theta$ は、一番大きい青の領域がカメラから見て占める角で、両端のあいだを測る。領域の画素を同じ面積の円に直し、カメラの位置からその円を見込んだ角が $\theta$ である。画面全体の画角とは別で、領域の中心が向いている方向でもない。
