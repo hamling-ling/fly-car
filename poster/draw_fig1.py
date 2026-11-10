@@ -3,7 +3,9 @@
 The camera and the motors are the physical layers. Red halves become ORN
 and PN concentrations, and the ipsilateral PN minus the contralateral PN
 is the DNa02 current. LC4 carries expansion, and LPLC2 carries angular
-size, into the ipsilateral DNp01 current. Each wheel reads the opposite side. No numbers.
+size, into the ipsilateral DNp01 current. Red firing drives both wheels
+forward, and the yaw from the concentration difference stops at a cap.
+Blue firing drives the opposite wheel backward. No numbers.
 """
 
 from pathlib import Path
@@ -118,10 +120,10 @@ def main() -> None:
 
     box(ax, 10.4, 1.55, 2.05, 4.35, WHITE, LINE, lw=1.8)
     text(ax, 11.42, 5.35, "車輪速度", 15, weight="medium")
-    text(ax, 11.42, 4.45, "左輪は右の細胞", 13)
-    text(ax, 11.42, 3.85, "右輪は左の細胞", 13)
-    text(ax, 11.42, 3.15, "赤の発火は前へ", 13)
-    text(ax, 11.42, 2.45, "青の発火は後へ", 13)
+    text(ax, 11.42, 4.55, "赤は両輪が前へ", 12)
+    text(ax, 11.42, 4.00, "差は回頭の上限まで", 12)
+    text(ax, 11.42, 3.45, "青は反対の輪が後へ", 12)
+    text(ax, 11.42, 2.90, "頭は赤へ向く", 12)
 
     arrow(ax, 2.5, 3.85, 4.95, RED)
     arrow(ax, 2.5, 3.85, 2.5, BLUE)

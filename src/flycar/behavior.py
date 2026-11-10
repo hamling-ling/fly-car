@@ -24,7 +24,7 @@ that scale at a command of ±1. A paper held in front fills about 0.10 of
 each eye. ``BETA`` of 0.45 puts both of those currents just over threshold,
 so the paper crawls. A speck of 0.01 at the center stays under. The same
 speck at an edge is scaled with the other fractions. ``poster/draw_fig5.py``
-keeps 0.70 and its own wheel sum.
+keeps 0.70 for the DNa02 current. Its approach wheels call ``wheel_speeds``.
 
 ``Plant`` smooths each wheel with time constant ``TAU_V``. ``wheel_speeds``
 itself is the instantaneous command, so a formula check does not depend on
@@ -72,9 +72,10 @@ COUNT_FLOOR = 0.04
 # 0.10 of each eye, 0.70 leaves that pair under threshold, and 0.45 puts
 # both currents just over 1. A 0.01 speck at the center stays under. The
 # same speck at an edge is scaled with the other fractions.
-# poster/draw_fig5.py keeps 0.70. One cell at the refractory rate is a
+# poster/draw_fig5.py keeps 0.70 for the DNa02 current. One cell at the refractory rate is a
 # wheel command of ±1, and MOVE_MPS is the meters per second of that
-# command. FORWARD_PER_HZ is the poster's k in equations (17) and (18).
+# command. FORWARD_PER_HZ is the poster's k in equations (17), (20), and (21).
+# RED_YAW is k_ω and YAW_CAP is ω_max in (18). TRACK is d in (19).
 # 0.0009 m/s per hertz is 1.5 times the previous 0.0006, so MOVE_MPS is
 # 0.15. RED_YAW is unchanged.
 N_ORN = 1.0

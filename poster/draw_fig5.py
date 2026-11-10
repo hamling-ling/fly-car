@@ -8,7 +8,10 @@ side. Escape holds a 30° centered disk and a 20° right-eye disk, both
 expanding at the same rate. A cell reads the vertical blue fraction of the
 column at its stretched screen position. DNp01 adds the LC4 expansion term
 to the LPLC2 size term. The size term is a Gaussian of angular size, and it
-is zero when the disk is not expanding. Wheels read the opposite side.
+is zero when the disk is not expanding. Approach wheels follow
+``wheel_speeds``: the mean DNa02 rate is forward, and the yaw from the
+concentration difference stops at the cap, so one-sided red keeps both
+wheels rolling forward. Escape still puts DNp01 on the opposite wheel.
 Solid is the left side, dashed the right. The dotted line is the membrane
 threshold. Current, rate, and wheels use the whole trial. The membrane row
 is a short stretch once firing has started, because a spike lasts a few
@@ -34,9 +37,10 @@ from matplotlib.ticker import MaxNLocator
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from flycar.behavior import DT, FORWARD_PER_HZ, Lif, REFRAC_MS, TRACK, V_THRESHOLD
+from flycar.behavior import DT, Lif, MOVE_MPS, REFRAC_MS, TRACK, V_THRESHOLD, wheel_speeds
 from flycar.fov import Blob, Scene, camera_tangents, project_blob
 from flycar.loom import Disk, cells
+from flycar.occupancy import red_place
 
 from draw_fig2 import draw_approach
 from draw_fig3 import draw_front, draw_side, prepare
@@ -75,9 +79,8 @@ EXPANSION = 0.4
 FULL_RATE = 1.0 / 0.006
 # Wheel command filter. Long enough that one spike does not reach the motor.
 TAU_V = 0.10
-# Meters per second at a plotted wheel of 1. Used only to move the camera
-# during the approach. The wheel row itself stays on the -1 to 1 scale.
-MOVE_MPS = FORWARD_PER_HZ * FULL_RATE
+# MOVE_MPS is one cell at the refractory rate, in meters per second.
+# The wheel row divides by it, so that speed is 1 on the axis.
 WIDTH, HEIGHT = 320, 180
 HOLD = 20
 APPROACH_S = 2.4
@@ -200,11 +203,13 @@ def follow(speed: float, target: float) -> float:
 
 
 def approach():
-    """Right-hand red. The nose turns toward it, then both wheels go forward.
+    """Right-hand red. Both wheels stay forward, and the left one is faster.
 
     The sphere is close enough that the right current starts above threshold
     and the left current starts below it. Bilateral subtraction keeps the
-    weak side quiet until the red moves toward the middle.
+    weak side quiet until the red moves toward the middle. The wheels use
+    the mean of the two rates as forward speed and cap the yaw, so the
+    quiet side does not pivot.
     """
     scene = Scene(red=Blob((0.55, -0.18), 0.18), blue=None, run_s=APPROACH_S)
     x = y = heading = 0.0
@@ -215,21 +220,43 @@ def approach():
     volts = []
     for i in range(0, n, HOLD):
         view = project_blob(scene, x, y, heading, scene.red)
-        current = bilateral(eye_mean(view_mask(view)))
+        mask = view_mask(view)
+        fractions = eye_mean(mask)
+        current = bilateral(fractions)
+        place = red_place(mask)
         for _ in range(HOLD):
             dna[0].step(float(current[0]))
             dna[1].step(float(current[1]))
             volts.append((shown_voltage(dna[0]), shown_voltage(dna[1])))
-            u_left, u_right = command((dna[0].rate, dna[1].rate), (0.0, 0.0))
-            v_left = follow(v_left, u_left)
-            v_right = follow(v_right, u_right)
-        speed = 0.5 * (v_left + v_right) * MOVE_MPS
-        omega = (v_right - v_left) * MOVE_MPS / TRACK
+            _speed, _omega, target_left, target_right = wheel_speeds(
+                dna[0].rate,
+                dna[1].rate,
+                0.0,
+                0.0,
+                float(fractions[0]),
+                float(fractions[1]),
+                place,
+            )
+            v_left = follow(v_left, target_left)
+            v_right = follow(v_right, target_right)
+        speed = 0.5 * (v_left + v_right)
+        omega = (v_right - v_left) / TRACK
         step = DT * HOLD
         x += speed * float(np.cos(heading)) * step
         y += speed * float(np.sin(heading)) * step
         heading = float((heading + omega * step + np.pi) % (2 * np.pi) - np.pi)
-        rows.append((i * DT, current[0], current[1], dna[0].rate, dna[1].rate, v_left, v_right, heading))
+        rows.append(
+            (
+                i * DT,
+                current[0],
+                current[1],
+                dna[0].rate,
+                dna[1].rate,
+                v_left / MOVE_MPS,
+                v_right / MOVE_MPS,
+                heading,
+            )
+        )
     arr = np.array(rows)
     t_v = np.arange(len(volts)) * DT
     return arr[:, 0], arr[:, 1:3], (t_v, np.array(volts)), arr[:, 3:5], arr[:, 5], arr[:, 6], arr[:, 7]
@@ -401,9 +428,11 @@ def main() -> None:
     early = t0 < 0.25
     if not (i0[0, 1] > 1.0 > i0[0, 0]):
         raise RuntimeError("the approach did not start on the right eye only")
-    if not (float(np.max(vl0[early])) > 0.0 and float(np.max(np.abs(vr0[early]))) < 1e-6):
-        raise RuntimeError("the approach did not pivot on the right wheel")
-    if not (vl0[-1] > 0.0 and vr0[-1] > 0.0 and abs(vl0[-1] - vr0[-1]) < 0.2 * vl0[-1]):
+    if not (vl0[early][-1] > vr0[early][-1] > 0.0):
+        raise RuntimeError("the approach did not roll both wheels forward")
+    if float(np.min(vl0)) < -1e-6 or float(np.min(vr0)) < -1e-6:
+        raise RuntimeError("a red wheel reversed")
+    if not (vl0[-1] > 0.0 and vr0[-1] > 0.0):
         raise RuntimeError("the approach did not finish with both wheels forward")
     if float(heading0[-1]) >= 0.0:
         raise RuntimeError("the approach did not turn toward the right-hand red")
@@ -420,8 +449,8 @@ def main() -> None:
     if float(np.max(membrane2[1][:, 0])) >= 1.0 or float(np.max(membrane2[1][:, 1])) < 1.0:
         raise RuntimeError("the side membrane did not spike on the near eye only")
 
-    paths = prepare()
     save_case("赤に向かう", RED, approach_run[:6], draw_approach, OUT_APPROACH)
+    paths = prepare()
     save_case("正面の青から遠ざかる", BLUE, retreat, lambda ax: draw_front(ax, paths), OUT_RETREAT)
     save_case("横の青から回避する", BLUE, avoid, lambda ax: draw_side(ax, paths), OUT_AVOID)
 
