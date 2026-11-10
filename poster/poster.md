@@ -255,39 +255,6 @@ $$
 
 [![A Robot Using Fly Brain Cells to Approach and Dodge ](./top.png)](https://www.youtube.com/watch?v=30UnHq7dWzU "A Robot Using Fly Brain Cells to Approach and Dodge ")
 
-
-## 付録　視角 $\theta$ の計算
-
-$\theta$ は、一番大きい青の領域がカメラから見て占める角で、両端のあいだを測る。領域の画素を同じ面積の円に直し、カメラの位置からその円を見込んだ角が $\theta$ である。画面全体の画角とは別で、領域の中心が向いている方向でもない。
-
-画面は対角 $\delta = 58^\circ$ 、縦横比 $16/9$ である。カメラの前方、距離 1 の平面にこの画面を置く。左右の半幅の正接を $t_h$ 、上下の半高の正接を $t_v$ とすると、式 (24) を満たす。
-
-$$
-\sqrt{t_h^2 + t_v^2} = \tan(\delta/2), \qquad t_h = \frac{16}{9} t_v
-\qquad (24)
-$$
-
-画素 $(p, q)$ は 0 から 1 で、 $p$ は左から右、 $q$ は上から下にとる。距離 1 の平面では式 (25) の位置になる。
-
-$$
-n_x = (2p - 1) t_h, \qquad n_y = (1 - 2q) t_v
-\qquad (25)
-$$
-
-一番大きい領域の画素数を $N$ 、画像の横と縦の画素数を $W_{\mathrm{px}}$ 、 $H_{\mathrm{px}}$ とする。その画素を平面に置いた面積を $A$ 、同じ面積の円の半径を $R$ とする。中心の平面座標を $(\bar n_x, \bar n_y)$ 、カメラからその中心までの距離を $D$ とする。
-
-$$
-A = N \cdot \frac{2 t_h}{W_{\mathrm{px}}} \cdot \frac{2 t_v}{H_{\mathrm{px}}}, \qquad R = \sqrt{A/\pi}
-\qquad (26)
-$$
-
-$$
-D = \sqrt{1 + \bar n_x^2 + \bar n_y^2}, \qquad \theta = 2\arctan(R/D)
-\qquad (27)
-$$
-
-中心が画面の真ん中なら $D = 1$ である。この $\delta$ では、左右の端から端は約 $52^\circ$ 、上下の端から端は約 $30^\circ$ になる。
-
 ## 考察
 
 本モデルの行動は、四本の膜の間の結合ではなく、発火率を反対側の車輪へ渡す交差によって生じる。同側の刺激が反対側の車輪を動かすため、片側の赤では頭が赤へ向き、片側の青では頭が青から逸れる。左右の範囲を中央で重ねたことで、正面の刺激は両眼に入り、左右の差が小さいときは直進し、差が大きいときは旋回する。すなわち、接近と逃避の向きは、複雑な計算ではなく、下降ニューロンから車輪への渡し方で決まる。
@@ -327,3 +294,35 @@ Olsen, S. R. and Wilson, R. I. (2008). Lateral presynaptic inhibition mediates g
 Stein, R. B. (1965). A theoretical analysis of neuronal variability. Biophysical Journal, 5(2), 173–194. https://doi.org/10.1016/S0006-3495(65)86709-1
 
 Vosshall, L. B., Wong, A. M., and Axel, R. (2000). An olfactory sensory map in the fly brain. Cell, 102(2), 147–159. https://doi.org/10.1016/S0092-8674(00)00021-0
+
+## 付録　視角 $\theta$ の計算
+
+$\theta$ は、一番大きい青の領域がカメラから見て占める角で、両端のあいだを測る。領域の画素を同じ面積の円に直し、カメラの位置からその円を見込んだ角が $\theta$ である。画面全体の画角とは別で、領域の中心が向いている方向でもない。
+
+画面は対角 $\delta = 58^\circ$ 、縦横比 $16/9$ である。カメラの前方、距離 1 の平面にこの画面を置く。左右の半幅の正接を $t_h$ 、上下の半高の正接を $t_v$ とすると、式 (24) を満たす。
+
+$$
+\sqrt{t_h^2 + t_v^2} = \tan(\delta/2), \qquad t_h = \frac{16}{9} t_v
+\qquad (24)
+$$
+
+画素 $(p, q)$ は 0 から 1 で、 $p$ は左から右、 $q$ は上から下にとる。距離 1 の平面では式 (25) の位置になる。
+
+$$
+n_x = (2p - 1) t_h, \qquad n_y = (1 - 2q) t_v
+\qquad (25)
+$$
+
+一番大きい領域の画素数を $N$ 、画像の横と縦の画素数を $W_{\mathrm{px}}$ 、 $H_{\mathrm{px}}$ とする。その画素を平面に置いた面積を $A$ 、同じ面積の円の半径を $R$ とする。中心の平面座標を $(\bar n_x, \bar n_y)$ 、カメラからその中心までの距離を $D$ とする。
+
+$$
+A = N \cdot \frac{2 t_h}{W_{\mathrm{px}}} \cdot \frac{2 t_v}{H_{\mathrm{px}}}, \qquad R = \sqrt{A/\pi}
+\qquad (26)
+$$
+
+$$
+D = \sqrt{1 + \bar n_x^2 + \bar n_y^2}, \qquad \theta = 2\arctan(R/D)
+\qquad (27)
+$$
+
+中心が画面の真ん中なら $D = 1$ である。この $\delta$ では、左右の端から端は約 $52^\circ$ 、上下の端から端は約 $30^\circ$ になる。
