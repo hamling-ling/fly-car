@@ -77,14 +77,14 @@ c'_{L,R}=(1+\kappa|\hat p|) c_{L,R}
 \qquad (5)
 $$
 
-PN の出力 $`u^{\mathrm{PN}}_{L,R}`$ は、一つの触角に収束した濃度 $c'$ を 0 から 1 へ飽和させたものである。一つの触角では、ORN は位置で分けず、同じ濃度を受ける。濃度が高いほど ORN の発火率は上がる。飽和により、この出力は 1 を超えない。 $n$ はその触角にある ORN の数で、画素数ではない。左右で一つの値であり、端の倍率は濃度 $c'$ に入っている。 $c_0$ は飽和の定数である（Bhandawat et al., 2007; Olsen and Wilson, 2008）。 $`u^{\mathrm{PN}}_{L,R}`$ は式 (6) で表される。
+PN の出力 $`u^{\mathrm{PN}}_{L,R}`$ は、一つの触角に収束した濃度 $c'$ を、ミカエリス–メンテン型の飽和関数に通したものである。一つの触角では、ORN は位置で分けず、同じ濃度を受ける。濃度が高いほど ORN の発火率は上がる。飽和により、この出力は 1 を超えない。 $n$ はその触角にある ORN の数で、画素数ではない。左右で一つの値であり、端の倍率は濃度 $c'$ に入っている。 $c_0$ は、出力が半分になる濃度を決める定数である（Bhandawat et al., 2007; Olsen and Wilson, 2008）。 $`u^{\mathrm{PN}}_{L,R}`$ は式 (6) で表される。
 
 $$
 u^{\mathrm{PN}}_{L,R}=\frac{n c'_{L,R}}{n c'_{L,R}+c_0}
 \qquad (6)
 $$
 
-左の DNa02 の電流 $I^{\mathrm{DNa02}}_{L}$ は、同側の PN から、反対側の PN の $\beta$ 倍を引いたものである。 $\beta$ は反対側からの抑制の係数で、0 から 1 の値をとる。左右を比べることで、どちら側が濃いかがこの電流に現れる。 $\alpha$ は発火率を電流の大きさに合わせる係数で、逃避の電流で定める。反対側が大きい側の電流は負になり、その膜電位は下がる。この電流は式 (7) で表される。
+左の DNa02 の電流 $I^{\mathrm{DNa02}}_{L}$ は、同側の PN から、反対側の PN の $\beta$ 倍を引いたものである。 $\beta$ は反対側からの抑制の係数で、0 から 1 の値をとる。左右を比べることで、どちら側が濃いかがこの電流に現れる。 $\alpha$ は電流の尺度を決める係数で、接近と逃避で共通である。その決め方は、逃避の電流の式 (13) で述べる。反対側が大きい側の電流は負になり、その膜電位は下がる。この電流は式 (7) で表される。
 
 $$
 I^{\mathrm{DNa02}}_{L}=\alpha\left(u^{\mathrm{PN}}_{L}-\beta u^{\mathrm{PN}}_{R}\right)
@@ -134,18 +134,26 @@ F^{\mathrm{LPLC2}}_{L,R}
 \qquad (12)
 $$
 
-発火率を電流の大きさに合わせる係数 $\alpha$ は、 $r_{\max}/r_{\mathrm{ref}}$ である。LC4 の発火率は、見ている範囲の平均に拡大の強さを掛けたものである。LPLC2 の発火率は、見ている範囲の平均に視角の大きさを掛けたものである。平均も強さも 1 のとき、発火率は最大値 $r_{\max}$ になる。膜の閾値は 1 である。平均が 1 で、発火率が $r_{\mathrm{ref}}$ のとき、その項の電流は 1 になる。この係数は式 (13) である。
+$\alpha$ は、発火率を電流に直す係数である。式 (11) と式 (12) の寄与 $F^{\mathrm{LC4}}_{L,R}$ と $F^{\mathrm{LPLC2}}_{L,R}$ は 0 から 1 の量で、それぞれに $s(\dot\theta)$ と $g(\dot\theta)$ を掛けたものが、その細胞の発火率を最大値 $r_{\max}$ で割ったものにあたる。したがって $\alpha$ を掛けることは、発火率を $r_{\mathrm{ref}}$ で割ることと同じであり、発火率が $r_{\mathrm{ref}}$ のとき、その項の電流は膜の閾値 1 にちょうどなる。ここで $r_{\mathrm{ref}}$ は、計算のフレームごとに 1 回発火する率である。接近の電流（式 (7)）の $\alpha$ も同じ値で、PN の出力を同じ尺度で電流に直す。この係数は式 (13) である。
 
 $$
 \alpha = \frac{r_{\max}}{r_{\mathrm{ref}}}
 \qquad (13)
 $$
 
-同側の DNp01 の電流 $I^{\mathrm{DNp01}}_{L,R}$ は、LC4 の拡大の項と LPLC2 の大きさの項の和に、 $\alpha$ を掛けたものである。 $g(\theta)$ は視角の大きさで、LPLC2 の項に掛ける。視角が広がっているときだけ正で、止まっているときと遠ざかっているときは 0 である。左右は、それぞれ同側の和だけを受ける。この電流は式 (14) で表される。
+（注）フレームの長さは、モーターのサーボ PWM の周期に合わせている。
+
+同側の DNp01 の電流 $I^{\mathrm{DNp01}}_{L,R}$ は、LC4 の拡大の項と LPLC2 の項の和に、 $\alpha$ を掛けたものである。LPLC2 の項に掛ける $g(\dot\theta)$ は、視角 $\theta$ の大きさではなく、拡大速度 $\dot\theta$ で決まるスイッチ関数で、次で定める。 $m_g$ はスイッチの中心、 $w_g$ はその幅である。
+
+$$
+g(\dot\theta)=\frac{1}{1+\exp\left(-\dfrac{1}{w_g}(\dot\theta-m_g)\right)}
+$$
+
+$m_g$ は、視角のノイズの揺れより大きく、手で対象を近づける速さより小さい位置に置き、 $w_g$ はそれに比べて狭く取る。止まった青（$\dot\theta = 0$）では $g$ は小さく、LPLC2 の項は弱く入る。左右は、それぞれ同側の和だけを受ける。この電流は式 (14) で表される。
 
 $$
 I^{\mathrm{DNp01}}_{L,R}
-=\alpha\left(s(\dot\theta) F^{\mathrm{LC4}}_{L,R}+g(\theta) F^{\mathrm{LPLC2}}_{L,R}\right)
+=\alpha\left(s(\dot\theta) F^{\mathrm{LC4}}_{L,R}+g(\dot\theta) F^{\mathrm{LPLC2}}_{L,R}\right)
 \qquad (14)
 $$
 
@@ -288,6 +296,8 @@ Heisenberg, M. and Wolf, R. (1984). Vision in Drosophila: Genetics of Microbehav
 Kemppainen, J., Scales, B., Razban Haghighi, K., et al. (2022). Binocular mirror-symmetric microsaccadic sampling enables Drosophila hyperacute 3D vision. Proceedings of the National Academy of Sciences, 119(12), e2109717119. https://doi.org/10.1073/pnas.2109717119
 
 Klapoetke, N. C., Nern, A., Peek, M. Y., et al. (2017). Ultra-selective looming detection from radial motion opponency. Nature, 551(7679), 237–241. https://doi.org/10.1038/nature24626
+
+Michaelis, L., and Menten, M. L. (1913). Die Kinetik der Invertinwirkung. Biochemische Zeitschrift, 49, 333–369.
 
 Olsen, S. R. and Wilson, R. I. (2008). Lateral presynaptic inhibition mediates gain control in an olfactory circuit. Nature, 452(7190), 956–960. https://doi.org/10.1038/nature06864
 
