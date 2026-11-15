@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from flycar.behavior import DT, Plant, dna_current
-from flycar.loom import LEFT_HI, RIGHT_LO, LoomTrack, camera_tangents, project_rel
+from flycar.loom import DFOV_DEG, LEFT_HI, RIGHT_LO, LoomTrack, camera_tangents, project_rel
 
 
 @dataclass(frozen=True)
@@ -80,14 +80,14 @@ class Scene:
     """Initial conditions for one closed-loop run.
 
     The car starts at ``(x, y)`` with ``heading`` in radians. Pitch is degrees
-    down from the horizontal. The diagonal field is the Brio 100's 58°.
+    down from the horizontal. The diagonal field is ``DFOV_DEG``.
     """
 
     red: Blob | None = field(default_factory=_reference_red)
     blue: Blob | None = field(default_factory=_reference_blue)
     cam_h: float = 0.15
     pitch_deg: float = 12.0
-    dfov_deg: float = 58.0
+    dfov_deg: float = DFOV_DEG
     aspect: float = 16 / 9
     run_s: float = 8.0
     hold_steps: int = 20

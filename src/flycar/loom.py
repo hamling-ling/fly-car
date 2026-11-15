@@ -52,11 +52,13 @@ RASTER_H = 180
 RASTER_W = 320
 # Specks smaller than this fraction of the frame are not a disk.
 BLUE_MIN_FRACTION = 0.002
+# Diagonal field of view in degrees. Live measurement and the simulation both read this.
+DFOV_DEG = 58.0
 
 CELLS_PATH = Path(__file__).with_name("loom_cells.npz")
 
 
-def camera_tangents(dfov_deg: float = 58.0, aspect: float = 16 / 9) -> tuple[float, float]:
+def camera_tangents(dfov_deg: float = DFOV_DEG, aspect: float = 16 / 9) -> tuple[float, float]:
     """Tangent of the half-angles for a diagonal field on a 16:9 frame."""
     half = np.tan(np.deg2rad(dfov_deg) / 2.0)
     vertical = half / np.sqrt(aspect**2 + 1.0)
