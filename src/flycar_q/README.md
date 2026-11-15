@@ -47,7 +47,7 @@ deploy スクリプトはアプリを止めて、コピーして、残ってい�
 
 車の中心は Arduino UNO Q で、カメラと車輪は別の電源から取る。
 
-電源と USB はハブに集まる。モバイルバッテリーがハブの Power Delivery 入力に刺さり、ハブが UNO Q と Brio 100 と自分自身に給電する。UNO Q の USB-C はこのハブにつながる。USB-C が一つしかなく、電源とカメラを同じ口に載せるため、UNO Q からハブへの給電はしない。USB-C を PC に刺すデバイスモードでは、ホストのバスが空になるのでカメラは列挙されない。
+電源と USB はハブに集まる。モバイルバッテリーがハブの Power Delivery 入力に刺さり、ハブが UNO Q と Sunplus 2K AutoFocus Webcam と自分自身に給電する。UNO Q の USB-C はこのハブにつながる。USB-C が一つしかなく、電源とカメラを同じ口に載せるため、UNO Q からハブへの給電はしない。USB-C を PC に刺すデバイスモードでは、ホストのバスが空になるのでカメラは列挙されない。
 
 車輪は秋月電子通商の 2WD Mini Robot Mobile Platform Kit の部品である。FEETECH FT-SMC-2CH が二つの FEETECH FM90 を回し、電源は単三乾電池 4 本で、UNO Q の 5 V は使わない（モーターの電流を UNO Q から取らないため）。UNO Q から FT-SMC-2CH へは、右の信号 D3、左の信号 D5、GND をつなぐ。左の FM90 はプラスとマイナスを逆につないである。
 
@@ -55,7 +55,7 @@ deploy スクリプトはアプリを止めて、コピーして、残ってい�
 flowchart TB
   pack["モバイルバッテリー"]
   hub["ASUS USB Type-C Hub"]
-  brio["Logitech Brio 100"]
+  cam["Sunplus 2K AutoFocus Webcam"]
   uno["Arduino UNO Q"]
   aa["単三乾電池 4 本"]
   smc["FEETECH FT-SMC-2CH"]
@@ -63,7 +63,7 @@ flowchart TB
   left["FEETECH FM90（左）"]
 
   pack -->|給電| hub
-  brio -->|USB| hub
+  cam -->|USB| hub
   hub -->|USB-C。電源とホスト| uno
   aa -->|電源| smc
   uno -->|右の信号 D3| smc
@@ -76,14 +76,16 @@ flowchart TB
 | 部品 | 数量 | 備考 |
 | --- | --- | --- |
 | Arduino UNO Q | 1 | |
-| Logitech Brio 100 | 1 | USB Web カメラ |
+| Sunplus 2K AutoFocus Webcam | 1 | USB Web カメラ |
 | ASUS USB Type-C Hub | 1 | |
 | FEETECH FT-SMC-2CH | 1 | 秋月電子通商の 2WD Mini Robot Mobile Platform Kit |
 | FEETECH FM90| 2 | 秋月電子通商の 2WD Mini Robot Mobile Platform Kit |
 | モバイルバッテリー | 1 | |
 | 単三乾電池 | 4 | |
 
-カメラのつなぎ方の詳細は [camera_capture_q](../../research/camera_capture_q/README.md) と同じ。給電できるハブの先に Brio 100 を置く。
+カメラは当初 Logitech Brio 100（対角 58°）を使い、現在は Sunplus 2K AutoFocus Webcam（対角 90°）である。画角の値は `src/flycar/loom.py` の `DFOV_DEG` で与える。
+
+カメラのつなぎ方の詳細は [camera_capture_q](../../research/camera_capture_q/README.md) と同じ。給電できるハブの先にカメラを置く。
 
 ## ソフトウェア構成
 
@@ -158,7 +160,7 @@ classDiagram
 ```mermaid
 flowchart TB
   subgraph grab [カメラ]
-    eye["Brio 100。別スレッドが最新の 1 枚を置く"]
+    eye["Sunplus 2K。別スレッドが最新の 1 枚を置く"]
   end
   subgraph pre [色の周期ごと]
     halves["左右の眼の範囲。中央で重なる"]
@@ -319,7 +321,7 @@ LED3 が見ている色で、赤が写っていれば赤、青が写っていれ
 | 場所 | 内容 |
 | --- | --- |
 | `python/main.py` | 色の周期と膜の周期のループ |
-| `python/camera.py` | Brio を開き、最新フレームを置く |
+| `python/camera.py` | Sunplus 2K を開き、最新フレームを置く |
 | `python/face.py` | 占有とパルスから点マトリクスの絵を作る |
 | `python/motors.py` | `setMotorSpeed` をスケッチへ送る |
 | `python/config.py` | 左右反転と、上の二つの周期 |
