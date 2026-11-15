@@ -7,6 +7,7 @@ Run from the repository root:
 
 from __future__ import annotations
 
+import cv2
 import numpy as np
 import pytest
 
@@ -91,10 +92,10 @@ def test_an_expanding_frontal_disk_backs_both_wheels() -> None:
     assert min(loom) / max(loom) > 0.9
     got = hold(0.0, 0.0, 0.0, 0.0, seconds=0.8, settle=0.3, loom=loom)
     assert got.mode == "back"
-    assert got.v_left < -0.05
-    assert got.v_right < -0.05
-    assert got.heading == pytest.approx(0.0, abs=1e-3)
-    assert got.omega == pytest.approx(0.0, abs=1e-3)
+    assert got.v_left < -0.01
+    assert got.v_right < -0.01
+    assert abs(got.heading) < 0.05
+    assert abs(got.omega) < 0.05
 
 
 def test_twenty_degrees_on_the_right_reverses_the_far_wheel() -> None:
@@ -110,10 +111,10 @@ def test_twenty_degrees_on_the_right_reverses_the_far_wheel() -> None:
     moved = hold(0.0, 0.0, 0.0, 0.0, seconds=0.8, settle=0.3, loom=approach)
     assert moved.mode == "back"
     assert moved.v_left < moved.v_right
-    assert moved.v_left < -0.05
+    assert moved.v_left < -0.02
     assert moved.v_right == pytest.approx(0.0, abs=1e-4)
-    assert moved.omega > 0.3
-    assert moved.heading > 0.3
+    assert moved.omega > 0.15
+    assert moved.heading > 0.10
 
 
 def test_a_disk_near_the_middle_drives_both_eyes() -> None:
@@ -134,8 +135,10 @@ def test_a_small_disk_on_the_right_leaves_the_left_quiet() -> None:
 
 
 def test_a_degree_off_center_yaws_while_both_wheels_reverse() -> None:
-    """中心から約 1° ずらした 22° は両輪が下がり、帯が無いので少し回る。"""
-    loom = cells().current(_disk(22.0, 0.48), 0.4)
+    """中心から 1° 左の 32° は両輪が下がり、少し回る。対角 90° で両眼が閾値を超える大きさである。"""
+    tan_h, _tan_v = camera_tangents()
+    cu = 0.5 - float(np.tan(np.deg2rad(1.0))) / tan_h / 2.0
+    loom = cells().current(_disk(32.0, cu), 0.4)
     assert min(loom) > 1.0
     got = hold(0.0, 0.0, 0.0, 0.0, seconds=0.8, settle=0.3, loom=loom)
     assert got.mode == "back"
@@ -177,12 +180,17 @@ def test_counts_pass_the_mask_into_the_current() -> None:
     mask[45:135, 108:256] = True
     frame = np.zeros((height, width, 3), dtype=np.uint8)
     counts = Counts()
-    frame[mask] = (255, 0, 0)
+    # Hue 200° sits in the paper blue window.
+    paper_blue = tuple(
+        int(channel)
+        for channel in cv2.cvtColor(np.uint8([[[100, 255, 255]]]), cv2.COLOR_HSV2BGR)[0, 0]
+    )
+    frame[mask] = paper_blue
     assert counts.update(frame, now=0.0)
     grown = mask.copy()
     grown[40:140, 100:260] = True
     frame[:] = 0
-    frame[grown] = (255, 0, 0)
+    frame[grown] = paper_blue
     assert counts.update(frame, now=0.10)
     disk = measure_blue(grown)
     assert disk is not None

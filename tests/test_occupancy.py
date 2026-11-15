@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import cv2
 import numpy as np
 import pytest
 
@@ -24,6 +25,18 @@ from flycar.occupancy import (
 
 def _frame(width: int = 8, height: int = 4) -> np.ndarray:
     return np.zeros((height, width, 3), dtype=np.uint8)
+
+
+def _bgr(hue: int, saturation: int = 255, value: int = 255) -> tuple[int, int, int]:
+    """BGR for a hue in degrees. OpenCV stores half of that, so ``hue`` is even."""
+    pixel = np.uint8([[[hue // 2, saturation, value]]])
+    colour = cv2.cvtColor(pixel, cv2.COLOR_HSV2BGR)[0, 0]
+    return int(colour[0]), int(colour[1]), int(colour[2])
+
+
+# Paper red sits near hue 340. Paper blue is inside 180°–220°.
+PAPER_RED = _bgr(340, 220, 180)
+PAPER_BLUE = _bgr(200, 220, 180)
 
 
 def _document() -> dict:
@@ -100,7 +113,7 @@ def test_counts_hold_a_frame_and_clear_a_bad_one(capsys: pytest.CaptureFixture[s
     counts = Counts()
     assert counts.update(None) is True
     frame = _frame()
-    frame[:, :4] = (0, 0, 255)
+    frame[:, :4] = PAPER_RED
     assert counts.update(frame) is True
     # Left half of an 8-wide frame fills 4 of the 5 columns in p <= 0.65.
     assert counts.values[0] == pytest.approx(0.8)
@@ -115,7 +128,7 @@ def test_counts_hold_a_frame_and_clear_a_bad_one(capsys: pytest.CaptureFixture[s
 def test_counts_pass_mirror_through() -> None:
     counts = Counts()
     frame = _frame()
-    frame[:, :4] = (0, 0, 255)
+    frame[:, :4] = PAPER_RED
     assert counts.update(frame, mirror=True) is True
     # Mirrored, the red sits on the right. Four of the five right-range columns are red.
     assert counts.values[0] == pytest.approx(0.2)
@@ -124,9 +137,8 @@ def test_counts_pass_mirror_through() -> None:
 
 def test_red_on_the_left_and_blue_on_the_right() -> None:
     frame = _frame()
-    frame[:, :4] = (0, 0, 255)
-    # Pure blue is hue 240, inside the paper range. Pure cyan is hue 180.
-    frame[:, 4:] = (255, 0, 0)
+    frame[:, :4] = PAPER_RED
+    frame[:, 4:] = PAPER_BLUE
     red_l, red_r, blue_l, blue_r = half_counts(frame)
     assert red_l == 1.0
     assert red_r == 0.0
@@ -136,7 +148,7 @@ def test_red_on_the_left_and_blue_on_the_right() -> None:
 
 def test_partial_fill_is_the_pixel_fraction() -> None:
     frame = _frame()
-    frame[:2, :4] = (0, 0, 255)
+    frame[:2, :4] = PAPER_RED
     red_l, red_r, _, _ = half_counts(frame)
     assert red_l == 0.5
     assert red_r == 0.0
@@ -144,7 +156,7 @@ def test_partial_fill_is_the_pixel_fraction() -> None:
 
 def test_mirror_swaps_halves() -> None:
     frame = _frame()
-    frame[:, :4] = (0, 0, 255)
+    frame[:, :4] = PAPER_RED
     assert half_counts(frame, mirror=True)[1] == 1.0
 
 
@@ -179,13 +191,14 @@ def test_orange_screen_wall_skin_and_wood_are_not_red() -> None:
 
 
 def test_paper_blue_counts_and_phone_cyan_does_not() -> None:
-    """色紙と同じ色相の青は数える。スマホの水色は数えない。"""
+    """色相 200° の青と、同じ窓の中の本の背は数える。窓の外の水色は数えない。"""
     paper = _frame()
-    paper[:, :4] = (255, 0, 0)
+    paper[:, :4] = PAPER_BLUE
     book = _frame()
-    book[:, :4] = (101, 46, 26)
+    book[:, :4] = _bgr(210, 180, 120)
     cyan = _frame()
-    cyan[:, :4] = (255, 255, 0)
+    # Saturated cyan at hue 170, below the paper window of 180°–220°.
+    cyan[:, :4] = _bgr(170, 255, 255)
     pale = _frame()
     pale[:, :4] = (255, 255, 217)
     assert half_counts(paper)[2] == 1.0

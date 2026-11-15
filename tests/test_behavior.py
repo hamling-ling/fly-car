@@ -109,7 +109,8 @@ class TestRed:
         assert got.mode == "cruise"
         assert got.v_left > 0.02
         assert got.v_right == pytest.approx(0.0, abs=1e-6)
-        assert -OMEGA_SAFE <= got.omega < -0.5
+        assert got.omega == pytest.approx(-MOVE_MPS / TRACK, rel=0.01)
+        assert abs(got.omega) < OMEGA_SAFE
         assert got.heading < -0.10
 
     def test_left_red_stops_the_near_wheel(self) -> None:
@@ -118,7 +119,8 @@ class TestRed:
         assert got.mode == "cruise"
         assert got.v_right > 0.02
         assert got.v_left == pytest.approx(0.0, abs=1e-6)
-        assert 0.5 < got.omega <= OMEGA_SAFE
+        assert got.omega == pytest.approx(MOVE_MPS / TRACK, rel=0.01)
+        assert abs(got.omega) < OMEGA_SAFE
         assert got.heading > 0.10
 
     def test_red_covering_both_ranges_stops(self) -> None:
@@ -193,7 +195,7 @@ class TestWheels:
         assert v_left == pytest.approx(FORWARD_PER_HZ * 134.0)
         assert v_right == pytest.approx(0.0)
         assert omega == pytest.approx(-v_left / TRACK)
-        assert abs(omega) > 0.5
+        assert abs(omega) == pytest.approx(FORWARD_PER_HZ * 134.0 / TRACK)
         assert abs(omega) < OMEGA_SAFE
         raw = wheel_pulses(v_left, v_right)
         sent = calibrated_command(*raw)
@@ -216,18 +218,21 @@ class TestWheels:
         untouched = limit_rotation(0.04, 0.02)
         assert untouched == (0.04, 0.02)
 
-    def test_opposing_rates_stop_at_the_safe_yaw(self) -> None:
-        """赤と青が逆向きに満杯でも、平滑後の回頭は安全上限で止まる。"""
+    def test_opposing_rates_spin_under_the_safe_yaw(self) -> None:
+        """赤と青が逆向きに満杯だと、その場で回り、回頭は安全上限の下に収まる。"""
         plant = Plant()
         plant.dna_r.rate = FULL_RATE
         plant.gf_l.rate = FULL_RATE
         last = plant._emit(0.0, 0.0, DT)
         for _ in range(1999):
             last = plant._emit(0.0, 0.0, DT)
-        assert last.omega == pytest.approx(-OMEGA_SAFE)
+        assert last.v_left == pytest.approx(MOVE_MPS)
+        assert last.v_right == pytest.approx(-MOVE_MPS)
+        assert last.omega == pytest.approx(-2.0 * MOVE_MPS / TRACK)
         assert last.speed == pytest.approx(0.0, abs=1e-9)
+        assert abs(last.omega) < OMEGA_SAFE
         state = (plant.wheel_right - plant.wheel_left) / TRACK
-        assert abs(state) > OMEGA_SAFE
+        assert state == pytest.approx(last.omega)
 
     def test_one_sided_red_does_not_trip_the_safe_yaw(self) -> None:
         """片側の赤が不応期いっぱいに発火しても、安全上限は掛からない。"""
@@ -264,7 +269,7 @@ class TestWheels:
         assert abs(early.v_left) < abs(late.v_left) * 0.5
         assert late.mode == "back"
         assert late.v_left == pytest.approx(late.v_right)
-        assert late.v_left < -0.05
+        assert late.v_left == pytest.approx(-MOVE_MPS, rel=0.01)
         assert late.heading == pytest.approx(0.0, abs=1e-6)
 
 
@@ -289,21 +294,23 @@ class TestEscape:
         assert sent[1] <= -REVERSE_START
 
     def test_right_loom_reverses_only_the_left_wheel(self) -> None:
-        """右の DNp01 は左輪を後退させる。右輪は止まり、上限の端では平均を保つぶんだけ動く。"""
+        """右の DNp01 は左輪を後退させる。右輪は止まり、回頭は安全上限の下である。"""
         got = show(NO_RED, loom=LOOM_RIGHT)
         assert got.mode == "back"
-        assert got.v_left < -0.05
+        assert got.v_left < -0.9 * MOVE_MPS
         assert abs(got.v_right) < 1e-4
-        assert got.omega == pytest.approx(OMEGA_SAFE, abs=0.01)
+        assert got.omega == pytest.approx(-got.v_left / TRACK)
+        assert got.omega < OMEGA_SAFE
         assert got.heading > 0.5
 
     def test_left_loom_reverses_only_the_right_wheel(self) -> None:
-        """左の DNp01 は右輪を後退させる。左輪は止まり、上限の端では平均を保つぶんだけ動く。"""
+        """左の DNp01 は右輪を後退させる。左輪は止まり、回頭は安全上限の下である。"""
         got = show(NO_RED, loom=LOOM_LEFT)
         assert got.mode == "back"
-        assert got.v_right < -0.05
+        assert got.v_right < -0.9 * MOVE_MPS
         assert abs(got.v_left) < 1e-4
-        assert got.omega == pytest.approx(-OMEGA_SAFE, abs=0.01)
+        assert got.omega == pytest.approx(got.v_right / TRACK)
+        assert got.omega > -OMEGA_SAFE
         assert got.heading < -0.5
 
 
@@ -333,7 +340,7 @@ class TestTogether:
         assert got.mode == "spin"
         assert got.v_left < 0.0
         assert got.v_right > 0.0
-        assert got.omega > 0.5
+        assert got.omega > MOVE_MPS / TRACK
 
     def test_right_loom_overcomes_a_right_red(self) -> None:
         """同じ側の loom が片側の赤を上回ると、左輪が後退し、右輪は止まったまま左へ回る。"""
