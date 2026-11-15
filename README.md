@@ -36,7 +36,7 @@
 
 - シミュレーション: Linux と Python 3.12。パッケージは `numpy`、`matplotlib`、`japanize-matplotlib`、`pandas`、`pyarrow`、`pytest`、`jupyter`。`pandas` と `pyarrow` は、コネクトームの切り出しと結合表を読むノートだけで使う
 - 実機: Arduino Uno Q（Debian 13、Python 3.13）。シミュレーションだけならボードは要らない
-- カメラ: Logitech Brio 100。対角視野は製品仕様の 58°、取り込みは 1280×720。画角のシミュレーションはこの仕様の数字だけを使い、カメラ本体は要らない。撮影の実験では、給電できる USB ハブの先にカメラを置く
+- カメラ: Sunplus 2K AutoFocus Webcam。対角視野は 90° で、`src/flycar/loom.py` の `DFOV_DEG` がこの数字である。取り込みは 1280×720。画角のシミュレーションはこの数字だけを使い、カメラ本体は要らない。撮影の実験では、給電できる USB ハブの先にカメラを置く
 
 ## 準備
 

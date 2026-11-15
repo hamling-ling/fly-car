@@ -52,8 +52,9 @@ RASTER_H = 180
 RASTER_W = 320
 # Specks smaller than this fraction of the frame are not a disk.
 BLUE_MIN_FRACTION = 0.002
-# Diagonal field of view in degrees. Live measurement and the simulation both read this.
-DFOV_DEG = 58.0
+# Diagonal field of view in degrees for the Sunplus 2K webcam.
+# Live measurement and the simulation both read this.
+DFOV_DEG = 90.0
 
 CELLS_PATH = Path(__file__).with_name("loom_cells.npz")
 

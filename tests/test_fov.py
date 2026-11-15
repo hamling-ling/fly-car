@@ -49,11 +49,11 @@ def test_reference_red_turns_right_then_crawls():
     first = run.samples[0]
     assert first.heading == pytest.approx(0.0)
     assert first.red.inside
-    assert first.red.nx == pytest.approx(0.6479331048207451)
-    assert first.red.nx > 0.4
+    assert first.red.nx == pytest.approx(0.3591551847380347)
+    assert first.red.nx > 0.3
     assert first.red.right > first.red.left
     assert not any(sample.blue.inside for sample in run.samples)
-    assert min(sample.heading for sample in run.samples) < -0.15
+    assert min(sample.heading for sample in run.samples) < -0.14
     early = run.samples[5]
     assert early.v_left > early.v_right
     # The turn keeps bringing the blob toward center. Both wheels are
@@ -62,7 +62,7 @@ def test_reference_red_turns_right_then_crawls():
     assert crawling
     assert all(sample.v_left > 0.0 and sample.v_right > 0.0 for sample in crawling)
     assert all(sample.red.inside and sample.red.nx > -0.05 for sample in crawling)
-    assert min(sample.red.nx for sample in crawling) < 0.20
+    assert min(sample.red.nx for sample in crawling) < 0.25
     assert all(sample.mode != "stop" for sample in run.samples)
     assert "停止せず" in str(run)
     assert "青は画面の外のまま" in str(run)
@@ -126,7 +126,7 @@ def test_a_side_blue_yaws_the_nose_then_the_crawl_continues():
 def test_left_red_turns_left_without_a_blue_sphere():
     scene = Scene(red=Blob((1.30, 0.40), 0.12), blue=None, run_s=1.0)
     run = simulate(scene)
-    assert run.samples[0].red.nx < -0.4
+    assert run.samples[0].red.nx < -0.3
     assert max(sample.heading for sample in run.samples) > 0.05
     assert all(sample.blue.left == 0.0 and sample.blue.right == 0.0 for sample in run.samples)
     fig, anim = animate(run)
@@ -135,7 +135,7 @@ def test_left_red_turns_left_without_a_blue_sphere():
 
 
 def test_steep_pitch_puts_the_reference_red_outside_the_frame():
-    scene = Scene(pitch_deg=28.0, run_s=0.02)
+    scene = Scene(pitch_deg=40.0, run_s=0.02)
     view = project_blob(scene, 0.0, 0.0, 0.0, scene.red)
     assert view.inside is False
     assert simulate(scene).samples[0].red.left == 0.0
