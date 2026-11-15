@@ -92,7 +92,7 @@ KAPPA = 1.5
 # One-sided red peaks near 1.15. Red and blue together can reach about 2.4.
 # 1.5 sits between them, so a red sheet alone does not trip it.
 OMEGA_SAFE = 1.5
-FORWARD_PER_HZ = 0.0009
+FORWARD_PER_HZ = 0.0003
 # Refractory period 5 ms plus the step that crosses threshold is 6 ms.
 FULL_RATE = 1.0 / 0.006
 MOVE_MPS = FORWARD_PER_HZ * FULL_RATE

@@ -131,7 +131,7 @@ def red_place(mask: np.ndarray) -> float:
     width = int(image.shape[1])
     if width == 0:
         return 0.0
-    columns = np.asarray(image, dtype=np.float64).sum(axis=0)
+    columns = np.asarray(image).sum(axis=0, dtype=np.float64)
     total = float(columns.sum())
     if total <= 0.0:
         return 0.0
@@ -159,11 +159,10 @@ def range_means(mask: np.ndarray) -> tuple[float, float]:
     if width == 0 or image.size == 0:
         return 0.0, 0.0
     p = (np.arange(width) + 0.5) / float(width)
-    field = np.asarray(image, dtype=np.float64)
-    left = field[:, p <= LEFT_HI]
-    right = field[:, p >= RIGHT_LO]
-    left_mean = float(left.mean()) if left.size else 0.0
-    right_mean = float(right.mean()) if right.size else 0.0
+    left = image[:, p <= LEFT_HI]
+    right = image[:, p >= RIGHT_LO]
+    left_mean = float(np.count_nonzero(left)) / float(left.size) if left.size else 0.0
+    right_mean = float(np.count_nonzero(right)) / float(right.size) if right.size else 0.0
     return left_mean, right_mean
 
 
@@ -190,6 +189,21 @@ def _halves(
         _fill(blue, 0, mid),
         _fill(blue, mid, blue.shape[1]),
     )
+
+
+# Counting is statistical: two fills, a centroid, and column fractions.
+# The loom model's own raster is 320 wide, so the counts read a frame
+# shrunk to that width (720p becomes 320x180). Shots keep the full
+# frame; only counting shrinks.
+COUNT_W = 320
+
+
+def _count_frame(frame: np.ndarray) -> np.ndarray:
+    image = np.asarray(frame)
+    if image.ndim != 3 or image.shape[1] <= COUNT_W:
+        return image
+    height = max(1, int(round(image.shape[0] * COUNT_W / image.shape[1])))
+    return cv2.resize(image, (COUNT_W, height), interpolation=cv2.INTER_AREA)
 
 
 class Counts:
@@ -219,7 +233,7 @@ class Counts:
         if frame is None:
             return True
         try:
-            red, blue = color_masks(frame)
+            red, blue = color_masks(_count_frame(frame))
         except ValueError as exc:
             print(f"counts: {exc}")
             self.values = (0.0, 0.0, 0.0, 0.0)

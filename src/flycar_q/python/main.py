@@ -30,6 +30,30 @@ from trace import trace_line, trace_mark
 _face_error: str | None = None
 
 
+class _Span:
+    """Mean wall time of one loop section, read and reset like Plant.mean_ms."""
+
+    def __init__(self) -> None:
+        self._s = 0.0
+        self._n = 0
+
+    def add(self, span_s: float) -> None:
+        self._s += span_s
+        self._n += 1
+
+    def mean_ms(self) -> float:
+        if self._n == 0:
+            return 0.0
+        mean = self._s / self._n * 1000.0
+        self._s = 0.0
+        self._n = 0
+        return mean
+
+
+_count_span = _Span()
+_face_span = _Span()
+
+
 def publish_face(
     red_l: float,
     red_r: float,
@@ -90,7 +114,10 @@ def loop() -> None:
             if next_count.tick(now):
                 counted = True
                 held, held_seen = eye.shot()
-                if not counts.update(held, mirror=MIRROR, now=now):
+                began = time.monotonic()
+                counted_ok = counts.update(held, mirror=MIRROR, now=now)
+                _count_span.add(time.monotonic() - began)
+                if not counted_ok:
                     stopped = send(0, 0)
                     if stopped is not None:
                         last_sent = stopped
@@ -146,7 +173,9 @@ def loop() -> None:
                         if heartbeat:
                             line += (
                                 f"  cam {eye.fps():.1f} fps  "
-                                f"steps {plant.mean_ms():.2f} ms  n {n}"
+                                f"steps {plant.mean_ms():.2f} ms  n {n}  "
+                                f"cnt {_count_span.mean_ms():.1f} ms  "
+                                f"face {_face_span.mean_ms():.1f} ms"
                             )
                         if active or max(counts.values) >= 0.002:
                             name = shots.save(held, held_seen)
@@ -155,7 +184,9 @@ def loop() -> None:
                         print(line)
             if counted:
                 red_l, red_r, blue_l, blue_r = counts.values
+                began = time.monotonic()
                 publish_face(red_l, red_r, blue_l, blue_r, last_sent, last_mode)
+                _face_span.add(time.monotonic() - began)
             time.sleep(0.002)
     finally:
         send(0, 0)

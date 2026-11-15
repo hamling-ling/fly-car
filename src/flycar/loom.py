@@ -118,6 +118,17 @@ class Disk:
     theta: float
 
 
+def column_fractions(mask: np.ndarray) -> np.ndarray | None:
+    """Vertical mean of each column of a boolean mask. None when empty."""
+    image = np.asarray(mask)
+    if image.ndim != 2:
+        raise ValueError("blue mask must be a 2D image")
+    height, width = image.shape
+    if height == 0 or width == 0 or not np.any(image):
+        return None
+    return image.sum(axis=0, dtype=np.float64) / float(height)
+
+
 class Population:
     """Columns of one cell type, and each cell's synapse count onto DNp01."""
 
@@ -137,19 +148,21 @@ class Population:
         total = np.add.reduceat(self.n * self.u, self.starts)
         self.p = widen(total / self.cell_n)
 
-    def column_drive(self, mask: np.ndarray) -> np.ndarray:
+    def column_drive(
+        self, mask: np.ndarray, columns: np.ndarray | None = None
+    ) -> np.ndarray:
         """Return F for the left and the right eye.
 
         ``f_i`` is the vertical mean of ``mask`` at the cell's screen column.
         The side sum of ``w_i f_i`` is divided by that side's synapse total.
+        ``columns`` may carry the mask's column fractions, computed once
+        by the caller and shared between the two populations.
         """
-        image = np.asarray(mask)
-        if image.ndim != 2:
-            raise ValueError("blue mask must be a 2D image")
-        height, width = image.shape
-        if height == 0 or width == 0 or not np.any(image):
-            return np.zeros(2, dtype=np.float64)
-        columns = np.asarray(image, dtype=np.float64).mean(axis=0)
+        if columns is None:
+            columns = column_fractions(mask)
+            if columns is None:
+                return np.zeros(2, dtype=np.float64)
+        width = int(columns.shape[0])
         ui = np.clip(np.rint(self.p * width - 0.5).astype(np.int64), 0, width - 1)
         covered = columns[ui]
         out = np.zeros(2, dtype=np.float64)
@@ -188,8 +201,12 @@ class Cells:
         speed = expansion(theta_dot)
         gain = size_term(disk.theta, theta_dot)
         image = raster(disk) if mask is None else mask
-        lc4 = self.lc4.column_drive(image)
-        lplc = self.lplc2.column_drive(image)
+        columns = column_fractions(image)
+        if columns is None:
+            lc4 = lplc = np.zeros(2, dtype=np.float64)
+        else:
+            lc4 = self.lc4.column_drive(image, columns)
+            lplc = self.lplc2.column_drive(image, columns)
         drive = ALPHA * (speed * lc4 + gain * lplc)
         return float(drive[0]), float(drive[1])
 
