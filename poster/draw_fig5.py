@@ -9,9 +9,9 @@ expanding at the same rate. A cell reads the vertical blue fraction of the
 column at its stretched screen position. DNp01 adds the LC4 expansion term
 to the LPLC2 size term. The size term is a Gaussian of angular size, and it
 is zero when the disk is not expanding. Approach wheels follow
-``wheel_speeds``: the mean DNa02 rate is forward, and the yaw from the
-concentration difference stops at the cap, so one-sided red keeps both
-wheels rolling forward. Escape still puts DNp01 on the opposite wheel.
+``wheel_speeds``: each wheel reads the opposite DNa02 rate, so one-sided
+red stops the near wheel and drives the far wheel. Escape still puts
+DNp01 on the opposite wheel.
 Solid is the left side, dashed the right. The dotted line is the membrane
 threshold. Current, rate, and wheels use the whole trial. The membrane row
 is a short stretch once firing has started, because a spike lasts a few
@@ -40,7 +40,6 @@ sys.path.insert(0, str(ROOT / "src"))
 from flycar.behavior import DT, Lif, MOVE_MPS, REFRAC_MS, TRACK, V_THRESHOLD, wheel_speeds
 from flycar.fov import Blob, Scene, camera_tangents, project_blob
 from flycar.loom import Disk, cells
-from flycar.occupancy import red_place
 
 from draw_fig2 import draw_approach
 from draw_fig3 import draw_front, draw_side, prepare
@@ -203,13 +202,12 @@ def follow(speed: float, target: float) -> float:
 
 
 def approach():
-    """Right-hand red. Both wheels stay forward, and the left one is faster.
+    """Right-hand red. The far wheel leads, and the near wheel starts at rest.
 
     The sphere is close enough that the right current starts above threshold
     and the left current starts below it. Bilateral subtraction keeps the
-    weak side quiet until the red moves toward the middle. The wheels use
-    the mean of the two rates as forward speed and cap the yaw, so the
-    quiet side does not pivot.
+    weak side quiet until the red moves toward the middle. Each wheel reads
+    the opposite DNa02 rate, so a quiet side stops that wheel.
     """
     scene = Scene(red=Blob((0.55, -0.18), 0.18), blue=None, run_s=APPROACH_S)
     x = y = heading = 0.0
@@ -223,7 +221,6 @@ def approach():
         mask = view_mask(view)
         fractions = eye_mean(mask)
         current = bilateral(fractions)
-        place = red_place(mask)
         for _ in range(HOLD):
             dna[0].step(float(current[0]))
             dna[1].step(float(current[1]))
@@ -233,9 +230,6 @@ def approach():
                 dna[1].rate,
                 0.0,
                 0.0,
-                float(fractions[0]),
-                float(fractions[1]),
-                place,
             )
             v_left = follow(v_left, target_left)
             v_right = follow(v_right, target_right)

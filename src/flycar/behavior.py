@@ -12,28 +12,30 @@ DNp01 does not read the red fraction. Its current is computed by
 fill with no loom current does not fire.
 
 A red centroid toward an image edge multiplies both eye fractions by
-``1 + KAPPA * |place|`` before the PN and before the yaw. The empty eye
-stays at 0. At the center the factor is 1, so the fractions pass through.
-Forward speed is the mean of the two DNa02 rates. Yaw is the left-minus-right
-value of that scaled concentration, in radians per second, and it stops at
-``YAW_CAP``. A sheet that fills both eyes still turns toward the heavier
-eye, and equal concentrations stay straight. DNp01 is not part of that yaw:
-a one-sided loom still drives only the opposite wheel. Each command is divided by one
-cell's refractory rate, then scaled to meters per second. ``MOVE_MPS`` is
-that scale at a command of ±1. A paper held in front fills about 0.10 of
-each eye. ``BETA`` of 0.45 puts both of those currents just over threshold,
-so the paper crawls. A speck of 0.01 at the center stays under. The same
-speck at an edge is scaled with the other fractions. ``poster/draw_fig5.py``
-keeps 0.70 for the DNa02 current. Its approach wheels call ``wheel_speeds``.
+``1 + KAPPA * |place|`` before the PN. The empty eye stays at 0. At the
+center the factor is 1, so the fractions pass through. The wheels do not
+read the centroid or the concentrations. The left wheel is ``k`` times the
+right DNa02 rate minus the right DNp01 rate, and the right wheel swaps the
+sides. ``k`` is ``FORWARD_PER_HZ``. DNa02 drives forward and DNp01 drives
+reverse. One side firing alone stops the near wheel, so the turning radius
+stays at least half the track. Equal rates stay straight. ``MOVE_MPS`` is
+the speed of one cell at its refractory rate. A paper held in front fills
+about 0.10 of each eye. ``BETA`` of 0.45 puts both of those currents just
+over threshold, so the paper crawls. A speck of 0.01 at the center stays
+under. The same speck at an edge is scaled with the other fractions.
+``poster/draw_fig5.py`` keeps 0.70 for the DNa02 current. Its approach
+wheels call ``wheel_speeds``.
 
 ``Plant`` smooths each wheel with time constant ``TAU_V``. ``wheel_speeds``
 itself is the instantaneous command, so a formula check does not depend on
-filter state. ``catch_up_steps`` turns a late camera tick into milliseconds
-of membrane time, and stops at ``CATCH_UP_S`` so one noisy frame cannot
-run the filter for seconds.
+filter state. After the filter, ``limit_rotation`` keeps the mean speed and
+shrinks a yaw past ``OMEGA_SAFE``. Ordinary one-sided red stays under that
+cap. ``catch_up_steps`` turns a late camera tick into milliseconds of
+membrane time, and stops at ``CATCH_UP_S`` so one noisy frame cannot run
+the filter for seconds.
 
-The one hand-written exception is a safety stop. When both eye ranges are
-at least ``RED_FILL``, both wheels are held at rest even though DNa02 is
+The safety stop overrides the cap. When both eye ranges are at least
+``RED_FILL``, both wheels drop to rest on that update even though DNa02 is
 firing. A red that fills only one range still drives.
 
 ``blue_yaw_scale`` is still computed for the log. The wheels do not read it.
@@ -72,30 +74,24 @@ COUNT_FLOOR = 0.04
 # 0.10 of each eye, 0.70 leaves that pair under threshold, and 0.45 puts
 # both currents just over 1. A 0.01 speck at the center stays under. The
 # same speck at an edge is scaled with the other fractions.
-# poster/draw_fig5.py keeps 0.70 for the DNa02 current. One cell at the refractory rate is a
-# wheel command of ±1, and MOVE_MPS is the meters per second of that
-# command. FORWARD_PER_HZ is the poster's k in equations (17), (20), and (21).
-# RED_YAW is k_ω and YAW_CAP is ω_max in (18). TRACK is d in (19).
-# 0.0009 m/s per hertz is 1.5 times the previous 0.0006, so MOVE_MPS is
-# 0.15. RED_YAW is unchanged.
+# poster/draw_fig5.py keeps 0.70 for the DNa02 current. One cell at the
+# refractory rate is a wheel command of ±MOVE_MPS. FORWARD_PER_HZ is the
+# poster's k in equations (17) and (18). 0.0009 m/s per hertz is 1.5 times
+# the previous 0.0006, so MOVE_MPS is 0.15.
 N_ORN = 1.0
 C0 = 0.05
 ALPHA = 4.0
 BETA = 0.45
-# Radians per second for a red-concentration difference of 1, and the cap.
-# Log 20261108-133936 image 20261108-043944-047-1413 had red 0.00/0.017 at
-# place 0.97, so the scaled difference was 0.042. RED_YAW of 0.50 asked for
-# -0.02 rad/s, about 2 raw pulses, and the left-wheel hinge erased them.
-# 4.3 brings that sheet to the cap. The cap is 0.18 rad/s, about 10 pulses
-# of left lead after the hinge, and about 6° in one 0.6 s update. Equal
-# concentrations stay straight, and the forward speed stays the mean rate.
 # ``place`` is -1 at the left edge and +1 at the right edge, the poster's
-# p-hat. Both fractions are multiplied by 1 + KAPPA * |place| before the PN
-# and before this yaw. That is poster equation (5). The number stays out of
-# poster.md. An empty frame has place 0 so the factor is 1.
-RED_YAW = 4.3
-YAW_CAP = 0.18
+# p-hat. Both fractions are multiplied by 1 + KAPPA * |place| before the PN.
+# That is poster equation (5). The number stays out of poster.md. An empty
+# frame has place 0 so the factor is 1. The wheels read firing rates, so
+# this factor reaches a wheel only by changing the current.
 KAPPA = 1.5
+# Body-yaw cap after the wheel filter, in rad/s. The poster's ω_safe.
+# One-sided red peaks near 1.15. Red and blue together can reach about 2.4.
+# 1.5 sits between them, so a red sheet alone does not trip it.
+OMEGA_SAFE = 1.5
 FORWARD_PER_HZ = 0.0009
 # Refractory period 5 ms plus the step that crosses threshold is 6 ms.
 FULL_RATE = 1.0 / 0.006
@@ -190,39 +186,39 @@ def wheel_speeds(
     dna_r: float,
     gf_l: float,
     gf_r: float,
-    red_l: float = 0.0,
-    red_r: float = 0.0,
-    place: float = 0.0,
 ) -> tuple[float, float, float, float]:
     """Instantaneous path speed, body yaw, left wheel, and right wheel.
 
-    Forward speed is the mean of the two DNa02 rates. Yaw follows the
-    edge-scaled concentration ``c'_l - c'_r`` and stops at ``YAW_CAP``. The
-    heavier eye turns the heading toward itself and a one-eyed sheet does
-    not pivot. DNp01 stays on the opposite wheel and is not capped. Speeds
-    are meters per second. Positive yaw turns left. ``place`` is -1 at the
-    left edge and +1 at the right edge.
+    The left wheel reads the right DNa02 and DNp01 rates. The right wheel
+    reads the left pair. DNa02 drives forward and DNp01 drives reverse.
+    Speeds are meters per second. Positive yaw turns left. Yaw is the wheel
+    difference over the track. A silent cell stops its wheel, so one-sided
+    red keeps the near wheel at rest and the turning radius stays at least
+    half the track.
     """
-    forward = 0.5 * (float(dna_l) + float(dna_r)) / FULL_RATE * MOVE_MPS
-    c_l, c_r = prime_concentration(red_l, red_r, place)
-    omega = (c_l - c_r) * RED_YAW
-    if omega > YAW_CAP:
-        omega = YAW_CAP
-    elif omega < -YAW_CAP:
-        omega = -YAW_CAP
-    half = omega * TRACK / 2.0
-    # A silent pair has no forward speed, so a concentration speck cannot spin.
-    # The yaw term also stays inside the forward speed, which keeps both
-    # wheels rolling the same way on red alone.
-    if half > forward:
-        half = forward
-    elif half < -forward:
-        half = -forward
-    v_left = forward - half - float(gf_r) / FULL_RATE * MOVE_MPS
-    v_right = forward + half - float(gf_l) / FULL_RATE * MOVE_MPS
+    v_left = FORWARD_PER_HZ * (float(dna_r) - float(gf_r))
+    v_right = FORWARD_PER_HZ * (float(dna_l) - float(gf_l))
     speed = 0.5 * (v_left + v_right)
     omega = (v_right - v_left) / TRACK
     return speed, omega, v_left, v_right
+
+
+def limit_rotation(v_left: float, v_right: float) -> tuple[float, float]:
+    """Shrink a smoothed pair whose yaw exceeds ``OMEGA_SAFE``.
+
+    The mean speed stays. A pair already inside the cap is returned as it
+    stands. The caller applies the safety stop after this and can replace
+    the pair with rest.
+    """
+    left = float(v_left)
+    right = float(v_right)
+    omega = (right - left) / TRACK
+    if abs(omega) <= OMEGA_SAFE:
+        return left, right
+    mean = 0.5 * (left + right)
+    sign = 1.0 if omega >= 0.0 else -1.0
+    half = sign * OMEGA_SAFE * TRACK / 2.0
+    return mean - half, mean + half
 
 
 def speed_and_yaw(
@@ -230,17 +226,13 @@ def speed_and_yaw(
     dna_r: float,
     gf_l: float,
     gf_r: float,
-    red_l: float = 0.0,
-    red_r: float = 0.0,
-    place: float = 0.0,
 ) -> tuple[float, float]:
     """Forward speed in m/s and yaw in rad/s. Positive yaw turns left.
 
-    This is the instantaneous command. ``Plant`` smooths it with ``TAU_V``.
+    This is the instantaneous command. ``Plant`` smooths it with ``TAU_V``
+    and then applies ``limit_rotation``.
     """
-    speed, omega, _left, _right = wheel_speeds(
-        dna_l, dna_r, gf_l, gf_r, red_l, red_r, place
-    )
+    speed, omega, _left, _right = wheel_speeds(dna_l, dna_r, gf_l, gf_r)
     return speed, omega
 
 
@@ -329,7 +321,7 @@ class Plant:
         self.gf_r.step(i_gf[1])
         self.dna_l.step(i_dna[0])
         self.dna_r.step(i_dna[1])
-        return self._emit(red_l, red_r, DT, place)
+        return self._emit(red_l, red_r, DT)
 
     def steps(
         self,
@@ -363,7 +355,7 @@ class Plant:
             self.gf_r.step(i_gf[1])
             self.dna_l.step(i_dna[0])
             self.dna_r.step(i_dna[1])
-            step = self._emit(red_l, red_r, DT, place)
+            step = self._emit(red_l, red_r, DT)
         if step is None:
             raise RuntimeError("steps advanced no membrane time")
         self._step_s += time.monotonic() - began
@@ -379,7 +371,7 @@ class Plant:
         self._step_n = 0
         return mean
 
-    def _emit(self, red_l: float, red_r: float, dt: float, place: float = 0.0) -> Step:
+    def _emit(self, red_l: float, red_r: float, dt: float) -> Step:
         if red_fills_the_frame(red_l, red_r):
             self.wheel_left = 0.0
             self.wheel_right = 0.0
@@ -392,15 +384,11 @@ class Plant:
                 self.dna_r.rate,
                 self.gf_l.rate,
                 self.gf_r.rate,
-                red_l,
-                red_r,
-                place,
             )
             follow = dt / TAU_V
             self.wheel_left += follow * (-self.wheel_left + target_left)
             self.wheel_right += follow * (-self.wheel_right + target_right)
-            v_left = self.wheel_left
-            v_right = self.wheel_right
+            v_left, v_right = limit_rotation(self.wheel_left, self.wheel_right)
             speed = 0.5 * (v_left + v_right)
             omega = (v_right - v_left) / TRACK
         mode = motion_mode(speed, v_left, v_right)

@@ -69,7 +69,7 @@ def test_reference_red_turns_right_then_crawls():
 
 
 def test_reference_red_stops_when_both_ranges_fill():
-    """左右の範囲が 0.75 に届いて止まるのは 9.2 秒付近で、頭は右を向いている。"""
+    """左右の範囲が 0.75 に届いて止まるのは 9.0 秒付近で、頭は右を向いている。"""
     scene = Scene(
         cam_h=0.15,
         pitch_deg=12.0,
@@ -81,7 +81,7 @@ def test_reference_red_stops_when_both_ranges_fill():
     stops = [sample for sample in run.samples if sample.mode == "stop"]
     assert stops
     stop = stops[0]
-    assert stop.t == pytest.approx(9.18, abs=0.04)
+    assert stop.t == pytest.approx(8.98, abs=0.04)
     assert stop.red.left >= 0.75
     assert stop.red.right >= 0.75
     assert stop.heading < -0.15
@@ -109,7 +109,7 @@ def test_a_side_blue_yaws_the_nose_then_the_crawl_continues():
     """横の青のそばを這うと視角が広がって頭が一度それ、球には触らず赤へ進む。"""
     red = Blob((1.30, 0.00), 0.12)
     blue = Blob((0.45, -0.08), 0.10)
-    run = simulate(Scene(red=red, blue=blue, run_s=10.0))
+    run = simulate(Scene(red=red, blue=blue, run_s=12.0))
     assert max(sample.heading for sample in run.samples) > 0.10
     assert min(sample.heading for sample in run.samples) > -0.10
     assert abs(run.samples[-1].heading) < 0.10
