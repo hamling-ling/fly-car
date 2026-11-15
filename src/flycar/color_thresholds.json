@@ -2,7 +2,7 @@
   "red": {
     "saturation": 100,
     "value": 120,
-    "hue_low": 134,
+    "hue_low": -1,
     "hue_wrap": 322
   },
   "blue": {
@@ -17,7 +17,7 @@
       "n": 11,
       "worst": 0.852953,
       "worst_stamp": "20261115T102314_677",
-      "median": 0.997633
+      "median": 0.996952
     },
     "blue": {
       "n": 6,

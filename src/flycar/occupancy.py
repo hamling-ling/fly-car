@@ -18,8 +18,9 @@ app after replacing it. Hue in the file is degrees. OpenCV stores half of that.
 
 The paper's red sits near hue 340. A pale phone cyan near hue 180 is not
 this blue. A monitor or book spine in the same hue and saturation still
-matches. Wood at hue 30, skin near saturation 80, and the cream wall stay
-outside.
+matches when the region is large enough. Wood at hue 30, skin near
+saturation 80, and the cream wall stay outside. A connected region smaller
+than ``BLUE_MIN_FRACTION`` of the frame is dropped from both masks.
 """
 
 from __future__ import annotations
@@ -30,7 +31,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from flycar.loom import LEFT_HI, RIGHT_LO, LoomTrack, measure_blue
+from flycar.loom import BLUE_MIN_FRACTION, LEFT_HI, RIGHT_LO, LoomTrack, measure_blue
 
 THRESHOLDS_PATH = Path(__file__).with_name("color_thresholds.json")
 
@@ -109,7 +110,22 @@ def color_masks(frame_bgr: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     value = hsv[:, :, 2]
     red = (saturation >= RED_S) & (value >= RED_V) & ((hue <= RED_H_LOW) | (hue >= RED_H_WRAP))
     blue = (hue >= BLUE_H_LOW) & (hue <= BLUE_H_HIGH) & (saturation >= BLUE_S) & (value >= BLUE_V)
-    return red, blue
+    return _large_regions(red), _large_regions(blue)
+
+
+def _large_regions(mask: np.ndarray) -> np.ndarray:
+    """Drop connected regions smaller than ``BLUE_MIN_FRACTION`` of the frame."""
+    image = np.ascontiguousarray(np.asarray(mask, dtype=bool))
+    if image.size == 0 or not np.any(image):
+        return image
+    count, labels, stats, _centroids = cv2.connectedComponentsWithStats(
+        image.astype(np.uint8), connectivity=8
+    )
+    if count <= 1:
+        return image
+    keep = stats[:, cv2.CC_STAT_AREA] >= BLUE_MIN_FRACTION * image.size
+    keep[0] = False
+    return keep[labels]
 
 
 def _fill(mask: np.ndarray, x0: int, x1: int) -> float:

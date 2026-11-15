@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "research" / "color
 from fit_thresholds import (  # noqa: E402
     OUTPUT,
     PaperSample,
+    Recognition,
     blue_hue_bounds,
     fit_thresholds,
     frame_halves,
@@ -36,6 +37,25 @@ def _sheet(stamp: str, kind: str, hue: int, saturation: int, value: int, n: int 
     )
 
 
+def test_recognition_counts_the_quad_and_an_empty_frame() -> None:
+    rates = Recognition()
+    region = np.zeros((4, 4), dtype=bool)
+    region[:, :2] = True
+    red = np.zeros((4, 4), dtype=bool)
+    red[:, :1] = True
+    blue = np.zeros((4, 4), dtype=bool)
+    rates.add_quad("red", region, red, blue)
+    empty_red = np.zeros((10, 10), dtype=bool)
+    empty_red[0, 0] = True
+    empty_blue = np.zeros((10, 10), dtype=bool)
+    rates.add_empty("empty", empty_red, empty_blue)
+    text = rates.format()
+    assert "正解 50.0%" in text
+    assert "取りこぼし 50.0%" in text
+    assert "色紙の無い絵 赤 1.0% 青 0.0% どちらか 1.0%" in text
+    assert "empty 赤 1.0% 青 0.0%" in text
+
+
 def test_hue_snaps_match_the_paper_rule() -> None:
     assert snap_red_wrap(328) == 326
     assert snap_red_wrap(340) == 338
@@ -44,6 +64,14 @@ def test_hue_snaps_match_the_paper_rule() -> None:
     assert snap_red_low(None) == -1
     assert snap_blue(216, 238) == (210, 240)
     assert snap_blue(220, 240) == (220, 240)
+
+
+def test_a_few_orange_pixels_do_not_open_the_low_side() -> None:
+    # 色紙は 338 度。1 画素の 130 度は端の混入で、0 度側を開けない。
+    hue = np.array([338] * 99 + [130], dtype=np.int16)
+    low, wrap = red_hue_bounds([hue])
+    assert low == -1
+    assert wrap == 336
 
 
 def test_red_cluster_and_wrapped_tail_set_both_edges() -> None:

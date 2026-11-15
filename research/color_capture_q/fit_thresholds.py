@@ -7,8 +7,9 @@
 
 1. 囲いごとに色相の 10% 点と 90% 点を取る。
 2. 赤は 0 度をまたぐ。180 度未満には 360 度を足し、10% 点の最小を 2 度で
-   切り下げ、さらに 2 度広げる。0 度側に画素があるときは、その 99% 点の最大を
-   2 度で切り上げ、さらに 2 度広げる。
+   切り下げ、さらに 2 度広げる。足したあとの 99% 点が 360 度以上のときだけ
+   0 度側を開き、その超過分の最大を 2 度で切り上げ、さらに 2 度広げる。
+   四角の 1% に届かない画素は、0 度側を開かない。
 3. 青はまたがない。10% 点の最小を 10 度で切り下げ、90% 点の最大を 10 度で
    切り上げる。追加の 1 段は付けない。
 4. その色相の中で、彩度と明度を 10 刻みに上げる。どの四角形も画素の 80% 以上が
@@ -22,7 +23,7 @@ from __future__ import annotations
 import json
 import math
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import cv2
@@ -38,6 +39,7 @@ for path in (SRC, PY):
         sys.path.insert(0, str(path))
 
 from flycar.behavior import COUNT_FLOOR  # noqa: E402
+from flycar.occupancy import _large_regions  # noqa: E402
 from rects import region_mask  # noqa: E402
 
 RECALL_FLOOR = 0.80
@@ -119,18 +121,22 @@ def _as_pixels(sample: PaperSample) -> tuple[np.ndarray, np.ndarray, np.ndarray]
 
 
 def red_hue_bounds(hues: list[np.ndarray]) -> tuple[int, int]:
-    """赤の ``(low, wrap)``。判定は ``hue <= low`` または ``hue >= wrap``。"""
+    """赤の ``(low, wrap)``。判定は ``hue <= low`` または ``hue >= wrap``。
+
+    0 度側は、360 度を足した色相の 99% 点が 360 度以上のときだけ開く。
+    四角の 1% に届かない画素は、その 99% 点に入らない。
+    """
     shifted_p10: list[float] = []
-    tail_p99: list[float] = []
+    crossed: list[float] = []
     for hue in hues:
         if hue.size == 0:
             raise ValueError("空の四角形")
-        shifted = np.where(hue < HUE_SPLIT, hue + 360, hue)
+        shifted = np.where(hue < HUE_SPLIT, hue.astype(np.float64) + 360, hue)
         shifted_p10.append(float(np.percentile(shifted, 10)))
-        tail = hue[hue < HUE_SPLIT]
-        if tail.size:
-            tail_p99.append(float(np.percentile(tail, 99)))
-    low = snap_red_low(max(tail_p99) if tail_p99 else None)
+        high = float(np.percentile(shifted, 99))
+        if high >= 360:
+            crossed.append(high - 360)
+    low = snap_red_low(max(crossed) if crossed else None)
     wrap = snap_red_wrap(min(shifted_p10))
     return low, wrap
 
@@ -229,7 +235,10 @@ def fit_thresholds(samples: list[PaperSample]) -> Fit:
 
 
 def masks(image: np.ndarray, fit: Fit) -> tuple[np.ndarray, np.ndarray]:
-    """BGR の uint8 画像を、求めた下限で赤と青に分ける。"""
+    """BGR の uint8 画像を、求めた下限で赤と青に分ける。
+
+    画面の ``BLUE_MIN_FRACTION`` 未満の塊は、車と同じく残さない。
+    """
     frame = np.asarray(image)
     if frame.ndim != 3 or frame.shape[2] != 3 or frame.dtype != np.uint8:
         raise ValueError("frame must be a uint8 BGR image")
@@ -239,7 +248,7 @@ def masks(image: np.ndarray, fit: Fit) -> tuple[np.ndarray, np.ndarray]:
     value = hsv[:, :, 2]
     red = hue_matches(hue, fit.red) & (saturation >= fit.red.saturation) & (value >= fit.red.value)
     blue = hue_matches(hue, fit.blue) & (saturation >= fit.blue.saturation) & (value >= fit.blue.value)
-    return red, blue
+    return _large_regions(red), _large_regions(blue)
 
 
 def frame_halves(image: np.ndarray, fit: Fit) -> tuple[float, float, float, float]:
@@ -345,6 +354,108 @@ def load_marked(marked: Path) -> tuple[list[PaperSample], list[tuple[str, Path]]
     return samples, neither
 
 
+def _percent(part: int, whole: int) -> str:
+    if whole == 0:
+        return "なし"
+    return f"{100.0 * part / whole:.1f}%"
+
+
+@dataclass
+class Recognition:
+    """四角の中の正解と、色紙の無い絵の誤検出。車と同じく小さい塊は除く。"""
+
+    red_in: int = 0
+    red_hit: int = 0
+    red_as_blue: int = 0
+    blue_in: int = 0
+    blue_hit: int = 0
+    blue_as_red: int = 0
+    empty: int = 0
+    empty_red: int = 0
+    empty_blue: int = 0
+    empty_either: int = 0
+    empty_lines: list[str] = field(default_factory=list)
+
+    def add_quad(self, kind: str, region: np.ndarray, red: np.ndarray, blue: np.ndarray) -> None:
+        inside = np.asarray(region, dtype=bool)
+        own = red if kind == "red" else blue
+        other = blue if kind == "red" else red
+        count = int(inside.sum())
+        hit = int(np.asarray(own, dtype=bool)[inside].sum())
+        cross = int(np.asarray(other, dtype=bool)[inside].sum())
+        if kind == "red":
+            self.red_in += count
+            self.red_hit += hit
+            self.red_as_blue += cross
+        else:
+            self.blue_in += count
+            self.blue_hit += hit
+            self.blue_as_red += cross
+
+    def add_empty(self, stamp: str, red: np.ndarray, blue: np.ndarray) -> None:
+        red_mask = np.asarray(red, dtype=bool)
+        blue_mask = np.asarray(blue, dtype=bool)
+        self.empty += red_mask.size
+        red_count = int(red_mask.sum())
+        blue_count = int(blue_mask.sum())
+        either = int(np.logical_or(red_mask, blue_mask).sum())
+        self.empty_red += red_count
+        self.empty_blue += blue_count
+        self.empty_either += either
+        if red_count or blue_count:
+            self.empty_lines.append(
+                f"  {stamp} 赤 {_percent(red_count, red_mask.size)}"
+                f" 青 {_percent(blue_count, blue_mask.size)}"
+            )
+
+    def format(self) -> str:
+        paper_in = self.red_in + self.blue_in
+        paper_hit = self.red_hit + self.blue_hit
+        lines = [
+            "認識 四角の中"
+            f" 正解 {_percent(paper_hit, paper_in)}"
+            f" 取りこぼし {_percent(paper_in - paper_hit, paper_in)}",
+            "  赤"
+            f" 正解 {_percent(self.red_hit, self.red_in)}"
+            f" 取りこぼし {_percent(self.red_in - self.red_hit, self.red_in)}"
+            f" 青へ {_percent(self.red_as_blue, self.red_in)}",
+            "  青"
+            f" 正解 {_percent(self.blue_hit, self.blue_in)}"
+            f" 取りこぼし {_percent(self.blue_in - self.blue_hit, self.blue_in)}"
+            f" 赤へ {_percent(self.blue_as_red, self.blue_in)}",
+            "色紙の無い絵"
+            f" 赤 {_percent(self.empty_red, self.empty)}"
+            f" 青 {_percent(self.empty_blue, self.empty)}"
+            f" どちらか {_percent(self.empty_either, self.empty)}",
+        ]
+        lines.extend(self.empty_lines)
+        return "\n".join(lines)
+
+
+def report_recognition(marked: Path, fit: Fit) -> str:
+    """車が塗る範囲で、四角の中と色紙の無い絵を集計する。"""
+    rates = Recognition()
+    for path in sorted(marked.glob("*.json")):
+        meta = json.loads(path.read_text(encoding="utf-8"))
+        image_path = path.with_suffix(".jpg")
+        image = cv2.imread(str(image_path))
+        if image is None:
+            raise SystemExit(f"読めない: {image_path}")
+        red, blue = masks(image, fit)
+        if meta.get("neither"):
+            rates.add_empty(path.stem, red, blue)
+            continue
+        if meta.get("red") and not meta.get("blue"):
+            kind, mark = "red", meta["red"]
+        elif meta.get("blue") and not meta.get("red"):
+            kind, mark = "blue", meta["blue"]
+        else:
+            raise SystemExit(f"赤と青のどちらを使うか決まらない: {path.name}")
+        region = region_mask(image.shape[0], image.shape[1], mark)
+        rates.add_quad(kind, region, red, blue)
+    return rates.format()
+
+
 def main() -> None:
     samples, neither = load_marked(MARKED)
     fit = fit_thresholds(samples)
@@ -354,6 +465,7 @@ def main() -> None:
         f"四角の中で逆の色 赤→青 {fit.red_seen_as_blue:.3f} {fit.red_seen_as_blue_stamp}"
         f" 青→赤 {fit.blue_seen_as_red:.3f} {fit.blue_seen_as_red_stamp}"
     )
+    print(report_recognition(MARKED, fit))
     hits: list[tuple[str, tuple[float, float, float, float], float]] = []
     for stamp, image_path in neither:
         image = cv2.imread(str(image_path))

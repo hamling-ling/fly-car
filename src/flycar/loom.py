@@ -50,7 +50,8 @@ ALPHA = 4.0
 # Raster used when a caller has a disk and no camera mask.
 RASTER_H = 180
 RASTER_W = 320
-# Specks smaller than this fraction of the frame are not a disk.
+# A connected region smaller than this fraction of the frame is not counted.
+# Red and blue fill use it, and so does the blue disk.
 BLUE_MIN_FRACTION = 0.002
 # Diagonal field of view in degrees for the Sunplus 2K webcam.
 # Live measurement and the simulation both read this.
