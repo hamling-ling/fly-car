@@ -20,7 +20,7 @@ The paper's red sits near hue 340. A pale phone cyan near hue 180 is not
 this blue. A monitor or book spine in the same hue and saturation still
 matches when the region is large enough. Wood at hue 30, skin near
 saturation 80, and the cream wall stay outside. A connected region smaller
-than ``BLUE_MIN_FRACTION`` of the frame is dropped from both masks.
+than ``REGION_MIN_FRACTION`` of the frame is dropped from both masks.
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from flycar.loom import BLUE_MIN_FRACTION, LEFT_HI, RIGHT_LO, LoomTrack, measure_blue
+from flycar.loom import REGION_MIN_FRACTION, LEFT_HI, RIGHT_LO, LoomTrack, measure_blue
 
 THRESHOLDS_PATH = Path(__file__).with_name("color_thresholds.json")
 
@@ -114,7 +114,7 @@ def color_masks(frame_bgr: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
 
 
 def _large_regions(mask: np.ndarray) -> np.ndarray:
-    """Drop connected regions smaller than ``BLUE_MIN_FRACTION`` of the frame."""
+    """Drop connected regions smaller than ``REGION_MIN_FRACTION`` of the frame."""
     image = np.ascontiguousarray(np.asarray(mask, dtype=bool))
     if image.size == 0 or not np.any(image):
         return image
@@ -123,7 +123,7 @@ def _large_regions(mask: np.ndarray) -> np.ndarray:
     )
     if count <= 1:
         return image
-    keep = stats[:, cv2.CC_STAT_AREA] >= BLUE_MIN_FRACTION * image.size
+    keep = stats[:, cv2.CC_STAT_AREA] >= REGION_MIN_FRACTION * image.size
     keep[0] = False
     return keep[labels]
 

@@ -72,7 +72,7 @@ def test_loader_rejects_a_missing_file(tmp_path: Path) -> None:
 
 def test_a_region_below_the_frame_fraction_is_dropped() -> None:
     """画面の 0.2% 未満の塊は消え、それ以上の塊は残る。"""
-    from flycar.loom import BLUE_MIN_FRACTION
+    from flycar.loom import REGION_MIN_FRACTION
     from flycar.occupancy import _large_regions
 
     mask = np.zeros((100, 100), dtype=bool)
@@ -81,7 +81,7 @@ def test_a_region_below_the_frame_fraction_is_dropped() -> None:
     kept = _large_regions(mask)
     assert int(kept[:5, :5].sum()) == 25
     assert int(kept[80, 80:84].sum()) == 0
-    assert BLUE_MIN_FRACTION * mask.size == 20
+    assert REGION_MIN_FRACTION * mask.size == 20
 
 
 def test_red_place_follows_the_centroid() -> None:

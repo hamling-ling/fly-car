@@ -52,7 +52,7 @@ RASTER_H = 180
 RASTER_W = 320
 # A connected region smaller than this fraction of the frame is not counted.
 # Red and blue fill use it, and so does the blue disk.
-BLUE_MIN_FRACTION = 0.002
+REGION_MIN_FRACTION = 0.002
 # Diagonal field of view in degrees for the Sunplus 2K webcam.
 # Live measurement and the simulation both read this.
 DFOV_DEG = 90.0
@@ -260,7 +260,7 @@ def project_rel(
 def _largest_component(mask: np.ndarray) -> tuple[np.ndarray, np.ndarray, int] | None:
     """Row and column indices of the largest region, and the image width.
 
-    Regions smaller than ``BLUE_MIN_FRACTION`` of the frame, and an empty
+    Regions smaller than ``REGION_MIN_FRACTION`` of the frame, and an empty
     frame, return None.
     """
     image = np.ascontiguousarray(np.asarray(mask))
@@ -275,7 +275,7 @@ def _largest_component(mask: np.ndarray) -> tuple[np.ndarray, np.ndarray, int] |
     if areas.size == 0:
         return None
     chosen = 1 + int(np.argmax(areas))
-    if int(areas.max()) < BLUE_MIN_FRACTION * image.size:
+    if int(areas.max()) < REGION_MIN_FRACTION * image.size:
         return None
     ys, xs = np.nonzero(labels == chosen)
     return ys, xs, int(image.shape[1])
@@ -284,7 +284,7 @@ def _largest_component(mask: np.ndarray) -> tuple[np.ndarray, np.ndarray, int] |
 def measure_blue(mask: np.ndarray) -> Disk | None:
     """Fit one disk to the largest blue region in a boolean image.
 
-    The region has to cover at least ``BLUE_MIN_FRACTION`` of the frame.
+    The region has to cover at least ``REGION_MIN_FRACTION`` of the frame.
     Smaller regions, and a frame with no blue, return None.
     """
     found = _largest_component(mask)

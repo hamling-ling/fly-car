@@ -13,7 +13,7 @@ import pytest
 from flycar.behavior import hold
 from flycar.loom import (
     ALPHA,
-    BLUE_MIN_FRACTION,
+    REGION_MIN_FRACTION,
     CELLS_PATH,
     EXPANSION_FLOOR,
     K_S,
@@ -201,7 +201,7 @@ def test_raster_disk_recovers_its_angular_size() -> None:
     nx = (2.0 * u - 1.0) * tan_h
     ny = (1.0 - 2.0 * v) * tan_v
     mask = nx * nx + ny * ny <= radius_over_depth**2
-    assert mask.mean() > BLUE_MIN_FRACTION
+    assert mask.mean() > REGION_MIN_FRACTION
     disk = measure_blue(mask)
     assert disk is not None
     assert disk.theta == pytest.approx(2.0 * np.arctan(radius_over_depth), rel=0.02)
