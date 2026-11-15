@@ -1,73 +1,60 @@
 # Fly-Car
 
-コネクトームの細胞を使い、ハエの接近と逃避をロボットで動かす。
+オスのショウジョウバエのコネクトームから取った回路で、接近と逃避をする二輪ロボット。
 
 [![接近と逃避。赤へ向かい、青から下がる](poster/top.png)](https://www.youtube.com/watch?v=30UnHq7dWzU)
 
-オスのショウジョウバエのコネクトームが与える視覚細胞から下降ニューロンまでの接続と、嗅覚として反応する触角を一つの動作モデルにし、二輪駆動のロボットに載せた。コネクトームは、脳の細胞間の化学シナプスを数えた接続表である（[Berg et al., 2026](https://doi.org/10.1016/j.cell.2026.08.015)）。カメラの赤は誘引物質、青は近づいてくる対象である。式、数値計算、実機の図は [ポスター原稿](poster/poster.md) にある。
+コネクトームは、脳の細胞同士を結ぶ化学シナプスの数を数えた接続表である（[Berg et al., 2026](https://doi.org/10.1016/j.cell.2026.08.015)）。このロボットは、その接続表のうち視覚細胞から下降ニューロンまでの接続を使い、カメラの赤を誘引物質への嗅覚入力の代わりに、近づいてくる青い対象を逃避の引き金にして動く。モデルの式と数値計算、実機の記録は [ポスター原稿](poster/poster.md) にある。要点だけの [簡易版ポスター](poster/simple_poster.md) もある。
 
 ## 接近と逃避
 
-画面の片側に赤があると、両輪が前へ出て、赤い側の車輪が遅く、反対の車輪が速い。頭は赤の方を向く。赤が画面の中心に来ると、左右の車輪が同じ速さで前へ出て近づく。画面の片側の青では、反対の車輪が後ろへ出て、頭は青から回避する。正面の青では、両輪が揃って後ろへ出て、車体は青から離れる。
+赤が画面の片側にあると、車はその側へ向きを変えながら近づく。赤い側の車輪は止まり、反対の車輪が前へ出るので、旋回半径は車輪間隔の半分が下限になる。赤が中心に来ると、左右の車輪が同じ速さで前へ出て、まっすぐ近づく。
+
+青が近づいてくると、車は下がる。片側の青では、反対の車輪が後ろへ出て、頭は青から逸れる。正面の青では、両輪が揃って後ろへ出る。止まっている青には反応しない。下がるのは、青の像が広がっているあいだだけである。
 
 ![実機。接近、正面からの後退、横からの後退のカメラと左右の車輪の駆動方向](poster/fig4_wheels.png)
 
-数値計算は、赤に向かう場合、正面の青から遠ざかる場合、横の青から回避する場合の三枚である。各図の左が経路、右が電流、膜電位、発火率、左右の車輪速度である。
+数値計算は、赤に向かう場合、正面の青から遠ざかる場合、横の青から回避する場合の三場面である。各図の左が経路、右が電流、膜電位、発火率、左右の車輪速度である。
 
 ![赤に向かう](poster/fig_approach.png)
 
-確認したのは、このロボットが出した左右の車輪の動きである。床の上の距離へ車輪速度を合わせる作業は、まだ残っている。
+数値計算と実機で確認できているのは、モデルが出す左右の車輪速度の動きまでである。床の上での走行距離と車輪速度の対応（較正）は、まだ済んでいない。
 
 ## モデル
 
-このシステムは、カメラの画像を、接近の下降ニューロン DNa02、逃避の下降ニューロン DNp01、触角の嗅覚受容ニューロン ORN、同じ受容体が集まる投射ニューロン PN、視葉の LC4 と LPLC2 で処理し、左右のモーターへ出す。
+カメラの画像は、嗅覚受容ニューロン ORN と投射ニューロン PN（赤の経路）、視葉の LC4 と LPLC2（青の経路）を通り、接近の下降ニューロン DNa02 と逃避の下降ニューロン DNp01 の電流になる。四つの下降ニューロンの発火率が、左右の車輪速度になる。
 
 ![全体。カメラの画素が DNa02 と DNp01 の電流になり、発火率が左右の車輪速度になる](poster/fig1_model.png)
 
-赤は一種類の誘引物質で、左右の眼の範囲を左右の触角の代わりにする。範囲は中央で重なる。各範囲の赤の割合が同側の ORN に入り、PN で飽和する。同側の PN が促進し、反対側の PN が抑制する電流が、同側の DNa02 に入る。赤の画素が画面の端に寄るほど、左右の濃度は大きくなってから PN に渡る。
+赤の経路では、画面を左右の眼の範囲に分ける。範囲は中央で重なり、左は左端から 0.65 まで、右は 0.35 から右端までである。各範囲の赤の割合が、その側の触角への入力の代わりになる。割合は PN で飽和し、同側の PN が促進、反対側の PN が抑制として、同側の DNa02 に入る。赤の重心が端に寄るほど、左右の割合には同じ倍率が掛かる（中央では 1）。
 
-青は、近づいてくる対象である。各細胞の位置にある青の割合に、LC4 は拡大の強さを、LPLC2 は視角の大きさを掛ける。LPLC2 の項は、視角が広がっているあいだだけ正になる。二つの項の和が、同側の DNp01 の電流になる。重みは、コネクトームで数えた同側の DNp01 への化学シナプス数である。
+青の経路では、各細胞の画面位置にある青の割合を読む。LC4 は像の拡大の速さに、LPLC2 は広がっている像の大きさに応答する。LPLC2 の応答は、像が止まっているときは弱く、拡大が始まると強くなる。二つの応答の和が同側の DNp01 の電流になる。細胞ごとの重みは、コネクトームで数えた、その細胞から同側の DNp01 への化学シナプスの数である。
 
-四本の膜電位は互いにつながらず、同じ漏れ積分発火で求める。左の車輪は右の発火率を、右の車輪は左の発火率を読む。DNa02 は前へ、DNp01 は後へ動かす。片側だけの赤では赤い側の車輪が止まり、反対の車輪が前へ出る。平滑のあと、回転が安全上限を超えたときだけ左右の差を縮める。係数は `src/flycar/behavior.py` と `src/flycar/loom.py`、周期は `src/flycar_q/python/config.py` にある。番号つきの式は [ポスター原稿](poster/poster.md) に置いた。
+下降ニューロンの膜は四本とも互いにつながらず、同じ漏れ積分発火で計算する。車輪は発火率だけを読む。左の車輪は右の DNa02 から右の DNp01 を引いた発火率、右の車輪はその左右を入れ替えたものに従う。DNa02 は前進、DNp01 は後退である。車輪指令を平滑したあと、回転が安全上限を超えたときだけ、平均の速さを保って左右の差を縮める。赤が左右の範囲とも満ちているときは、安全のため両輪を止める。
+
+係数は `src/flycar/behavior.py` と `src/flycar/loom.py`、実機の周期は `src/flycar_q/python/config.py` にある。
 
 ## 必要な環境
 
-### Linux と Python
+- シミュレーション: Linux と Python 3.12。パッケージは `numpy`、`matplotlib`、`japanize-matplotlib`、`pandas`、`pyarrow`、`pytest`、`jupyter`。`pandas` と `pyarrow` は、コネクトームの切り出しと結合表を読むノートだけで使う
+- 実機: Arduino Uno Q（Debian 13、Python 3.13）。シミュレーションだけならボードは要らない
+- カメラ: Logitech Brio 100。対角視野は製品仕様の 58°、取り込みは 1280×720。画角のシミュレーションはこの仕様の数字だけを使い、カメラ本体は要らない。撮影の実験では、給電できる USB ハブの先にカメラを置く
 
-シミュレーションは Linux 上の Python 3.12 で確認している。使うパッケージは `numpy`、`matplotlib`、`japanize-matplotlib`、`pandas`、`pyarrow`、`pytest`、`jupyter` である。`pandas` と `pyarrow` はコネクトームの切り出しと、結合表を読むノートだけで使う。
-
-### Arduino Uno Q
-
-実機は Arduino Uno Q。OS は Debian 13、Python は 3.13。シミュレーションだけならボードは要らない。
-
-### Web カメラ
-
-目の代わりは Logitech Brio 100。対角視野は製品仕様の 58°、取り込みの既定は 1280×720 である。画角のシミュレーションはこの仕様の数字だけを使い、カメラ本体は要らない。撮影の実験では、給電できる USB ハブの先にカメラを置く。
-
-## Preparation
-
-### リポジトリの clone
+## 準備
 
 ```bash
 git clone https://github.com/hamling-ling/fly-car.git
 cd fly-car
-```
-
-### Python 環境のセットアップ
-
-```bash
 python3 -m pip install numpy matplotlib japanize-matplotlib pandas pyarrow pytest jupyter
 ```
 
 パッケージ `flycar` は `src/flycar` にある。`pytest` は `pyproject.toml` の `pythonpath` でそこを読む。ノートは同じ `src` を `sys.path` に足す。
 
-### コネクトームの切り出し
+コネクトームの結合表の入手、NeuPrint からの取り直し、loom 回路と DNa02 回路の切り出し、LC4 と LPLC2 の画面対応は [scripts/README.md](scripts/README.md) に書いた。画角のシミュレーションと `pytest` は、この表が無くても動く。
 
-結合表の入手、NeuPrint からの取り直し、loom 回路と DNa02 回路の切り出し、LC4 と LPLC2 の画面対応は [scripts/README.md](scripts/README.md) に書いた。画角のシミュレーションと `pytest` は、この表が無くても動く。
+## 動かし方
 
-## Quick Start
-
-### シミュレーションを動かす
+### シミュレーション
 
 リポジトリ直下で、車輪の固定フレームと基準の画角を確認する。
 
@@ -75,13 +62,15 @@ python3 -m pip install numpy matplotlib japanize-matplotlib pandas pyarrow pytes
 python3 -m pytest tests/test_behavior.py tests/test_fov.py
 ```
 
-絵を見るときは `research/notebooks/fov_sim.ipynb` を開く。球の位置を変えるのは `research/notebooks/fov_scenes.ipynb`。どちらもコネクトームの表は読まない。結合そのものを積分するのは `research/notebooks/gf_loom_sim.ipynb` と `research/notebooks/chemotaxis_sim.ipynb` で、先に [切り出し](scripts/README.md) を済ませる。
+絵を見るときは `research/notebooks/fov_sim.ipynb` を開く。球の位置を変えるのは `research/notebooks/fov_scenes.ipynb`。どちらもコネクトームの表は読まない。結合そのものを積分するのは `research/notebooks/gf_loom_sim.ipynb` と `research/notebooks/chemotaxis_sim.ipynb` で、先に切り出しを済ませる。ノートはリポジトリ直下か `research/notebooks/` から開く。
 
-ノートはリポジトリ直下か `research/notebooks/` から開く。
+### 実機
 
-### 実機で動かす
+本番のアプリは `src/flycar_q/` にあり、起動方法は [src/flycar_q/README.md](src/flycar_q/README.md) にある。カメラのフレームは `COUNT_S` ごとに読み、膜は `TICK_S` ごとに `Plant.steps` を呼んでパルスをマイコンへ送る。二つの定数は `src/flycar_q/python/config.py` にある。
 
-本番のアプリは `src/flycar_q/`。起動は [src/flycar_q/README.md](src/flycar_q/README.md)。カメラのフレームは `COUNT_S` ごとに読み、膜は `TICK_S` ごとに `Plant.steps` を呼んでパルスをマイコンへ送る。二つの定数は `src/flycar_q/python/config.py` にある。赤は左右の眼の範囲の濃度、青は視角と拡大にする。色の範囲は `src/flycar/color_thresholds.json` にあり、`occupancy.py` が読む。`research/color_capture_q/fit_thresholds.py` が色紙の4点からこのファイルを書く。床での走行と、m/s からパルスへの倍率は、まだ合わせていない。ラジコンとモーターの確認は `research/` に残してある。マイコンへ渡す左右の指令をその場で入れるアプリは [research/motor_adjust/README.md](research/motor_adjust/README.md)。直進に揃えた上限、マイコンへ送った指令、前進と後退の生値は [research/notebooks/straight_limits.ipynb](research/notebooks/straight_limits.ipynb)。ラジコンのページでは、その折れ線を右から左への変換としてオンにできる。`src/flycar_q` は送信直前に、同じ折れ線で左の指令を置き換える。
+色の範囲は `src/flycar/color_thresholds.json` にあり、`occupancy.py` が読む。`research/color_capture_q/fit_thresholds.py` が色紙の4点からこのファイルを書く。
+
+床での走行と、m/s からパルスへの倍率は、まだ合わせていない。ラジコンとモーターの確認は `research/` に残してある。マイコンへ渡す左右の指令をその場で入れるアプリは [research/motor_adjust/README.md](research/motor_adjust/README.md)。直進に揃えた上限、マイコンへ送った指令、前進と後退の生値は [research/notebooks/straight_limits.ipynb](research/notebooks/straight_limits.ipynb)。ラジコンのページでは、その折れ線を右から左への変換としてオンにできる。`src/flycar_q` は送信直前に、同じ折れ線で左の指令を置き換える。
 
 ## 内容物
 
@@ -100,6 +89,7 @@ python3 -m pytest tests/test_behavior.py tests/test_fov.py
 | `research/notebooks/gf_loom_sim.ipynb` | loom 回路の結合と DNp01 |
 | `research/notebooks/chemotaxis_sim.ipynb` | 赤と青の机上走行。車輪則はノート側に別にある |
 | `poster/poster.md` | 動作モデルの式、数値計算、実機 |
+| `poster/simple_poster.md` | ポスターの簡易版 |
 | `tests/` | 固定フレームと基準場面 |
 
 ### 実機を使ったキャプチャの実験
