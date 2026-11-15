@@ -198,7 +198,7 @@ sequenceDiagram
 scripts/deploy_flycar_q.sh
 ```
 
-別のホストへ置くときは `scripts/deploy_flycar_q.sh arduino@<ホスト名>.local` とする。スケッチを必ず作り直すときは `scripts/deploy_flycar_q.sh --rebuild` とする。
+別のホストへ置くときは `scripts/deploy_flycar_q.sh arduino@<ホスト名>.local` とする。スケッチを必ず作り直すときは `scripts/deploy_flycar_q.sh --rebuild` とする。JPEG を書かずに起動するときは `scripts/deploy_flycar_q.sh --no-jpeg` とする。`--rebuild` と一緒に付けられる。
 
 手で起動するときは SSH で入る。起動コマンドはシェルに戻る。
 
@@ -228,7 +228,9 @@ scripts/logs_flycar_q.sh
 
 別のホストは `scripts/logs_flycar_q.sh arduino@<ホスト名>.local` とする。
 
-止まっているあいだは心拍の行だけ出す。青の電流、発火率、車輪のどれかがあるあいだは細かく出し、指令が変わったときにも出す。周期は `python/config.py` にある。行には、左右の眼の範囲の赤と青の割合、左右の DNp01 電流、`b`、弱い電流 / 強い電流（`ratio`）、DNp01 と DNa02 の発火率、視角、拡大速度、経路速度 `v`、ヨー `yaw`、送る前の車輪速度とパルス（`wheel` と `raw`）、送ったパルス、モードが並ぶ。心拍の行には、その窓のカメラ取得と `Plant.steps` の時間、進めた膜の回数も付く。`b` は記録だけで、車輪は読まない。色が写っている行、または車輪か発火がある行には `img` が付く。これはその行が数えたフレームの JPEG で、ボードの `~/ArduinoApps/flycar_q/frames/` に書かれる。同じ取り込みは 1 枚だけなので、カメラが同じ絵を繰り返しているあいだは複数の行が同じ `img` を指す。アプリを起動し直すと、前の JPEG は消える。`scripts/logs_flycar_q.sh` を Ctrl-C で止めると、ボードの `frames/` にある JPEG を `logs/flycar_q-日時/` へコピーし、コピーし終えたファイルをボードから消す。届いた大きさがボードと違うファイルは消さない。
+止まっているあいだは心拍の行だけ出す。青の電流、発火率、車輪のどれかがあるあいだは細かく出し、指令が変わったときにも出す。周期は `python/config.py` にある。行には、左右の眼の範囲の赤と青の割合、左右の DNp01 電流、`b`、弱い電流 / 強い電流（`ratio`）、DNp01 と DNa02 の発火率、視角、拡大速度、経路速度 `v`、ヨー `yaw`、送る前の車輪速度とパルス（`wheel` と `raw`）、送ったパルス、モードが並ぶ。心拍の行には、その窓のカメラ取得と `Plant.steps` の時間、進めた膜の回数も付く。`b` は記録だけで、車輪は読まない。色が写っている行、または車輪か発火がある行には `img` が付く。これはその行が数えたフレームの JPEG で、ボードの `~/ArduinoApps/flycar_q/frames/` に書かれる。同じ取り込みは 1 枚だけなので、カメラが同じ絵を繰り返しているあいだは複数の行が同じ `img` を指す。JPEG を書く起動では、前の JPEG は消える。`scripts/logs_flycar_q.sh` を Ctrl-C で止めると、ボードの `frames/` にある JPEG を `logs/flycar_q-日時/` へコピーし、コピーし終えたファイルをボードから消す。届いた大きさがボードと違うファイルは消さない。
+
+JPEG を書かずに走らせるには、アプリのディレクトリへ空ファイル `no-jpeg` を置いてから起動する。その走行は `frames/` を作らず、前の JPEG も消さず、ログに `img` を付けない。起動時のログは `camera: JPEG は書かない` である。ファイルを消して起動し直すと、また `frames/` へ書く。`scripts/deploy_flycar_q.sh --no-jpeg` はコピーのあとでそのファイルを置いて起動する。このオプションの無い配置は、ボードに残っている `no-jpeg` を消してから起動する。手で切り替えるときは、SSH の先で `touch ~/ArduinoApps/flycar_q/no-jpeg` か `rm -f ~/ArduinoApps/flycar_q/no-jpeg` をしてから、止めて、起動する。
 
 ボード上で見るときは、SSH の先で次を実行する。
 

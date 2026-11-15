@@ -24,7 +24,7 @@ from config import COUNT_S, DETAIL_S, LOG_S, MIRROR, TICK_S
 from face import frame, lamps
 from motors import send, wait_until_bridge
 from schedule import Next
-from shots import Shots
+from shots import Shots, jpeg_enabled
 from trace import trace_line, trace_mark
 
 _face_error: str | None = None
@@ -64,15 +64,18 @@ def loop() -> None:
     eye = Eye()
     plant = Plant()
     counts = Counts()
-    shots = Shots()
+    shots = Shots(enabled=jpeg_enabled())
     try:
         eye.start()
         if not eye.wait_ready():
             print("camera: フレームが来てから走り始める")
         held, held_seen = eye.shot()
-        opened = shots.save(held, held_seen)
-        if opened:
-            print(f"camera: frame {opened}")
+        if shots.enabled:
+            opened = shots.save(held, held_seen)
+            if opened:
+                print(f"camera: frame {opened}")
+        else:
+            print("camera: JPEG は書かない")
         next_count = Next(COUNT_S)
         next_tick = Next(TICK_S)
         next_log = Next(LOG_S)
