@@ -94,8 +94,15 @@ python3 -m pytest tests/test_behavior.py tests/test_fov.py
 
 Uno Q に Brio 100 を載せて 1 枚取る手順は [research/camera_capture_q/README.md](research/camera_capture_q/README.md)。スクリプトは `research/camera_capture_q/capture.py`。色の見本をボタンでフォルダに分けるアプリは [research/color_capture_q/README.md](research/color_capture_q/README.md)。
 
-### 本番の車
+### 実機で動かすプログラム
+
+本番の `flycar_q` と、製作の過程で作った確認・調整用のアプリである。
 
 | 場所 | 内容 |
 |---|---|
-| `src/flycar_q/` | Uno Q に載せるアプリ。カメラ、膜、車輪 |
+| `src/flycar_q/` | Uno Q に載せる本番のアプリ。カメラ、膜、車輪 |
+| `research/motor_test/` | 車輪の前進と後進、ピンとパルスを確認したテスト用アプリ |
+| `research/remote_control/` | ラジコン。ブラウザに Brio 100 の映像を出し、十字キーで左右の車輪を動かす |
+| `research/motor_adjust/` | 車輪の調整。マイコンへ渡す左右の指令をその場で入れる。カメラは使わない |
+| `research/camera_capture_q/` | Uno Q に Brio 100 を載せて 1 枚取るスクリプト |
+| `research/color_capture_q/` | 色の見本を取るアプリ。映像を止めて、赤と青を4点で囲んで保存する |
