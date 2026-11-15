@@ -92,7 +92,7 @@ python3 -m pytest tests/test_behavior.py tests/test_fov.py
 
 ### 実機を使ったキャプチャの実験
 
-Uno Q に Brio 100 を載せて 1 枚取る手順は [research/camera_capture_q/README.md](research/camera_capture_q/README.md)。スクリプトは `research/camera_capture_q/capture.py`。色の見本をボタンでフォルダに分けるアプリは [research/color_capture_q/README.md](research/color_capture_q/README.md)。
+Uno Q に Brio 100 を載せて 1 枚取る手順は [research/camera_capture_q/README.md](research/camera_capture_q/README.md)。スクリプトは `research/camera_capture_q/capture.py`。映像を止めて赤と青を4点で囲み、色の見本を保存するアプリは [research/color_capture_q/README.md](research/color_capture_q/README.md)。
 
 ### 実機で動かすプログラム
 
