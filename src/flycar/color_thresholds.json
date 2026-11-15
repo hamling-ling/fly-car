@@ -1,29 +1,29 @@
 {
   "red": {
-    "saturation": 120,
-    "value": 50,
-    "hue_low": 10,
-    "hue_wrap": 326
+    "saturation": 100,
+    "value": 120,
+    "hue_low": 134,
+    "hue_wrap": 322
   },
   "blue": {
-    "saturation": 140,
-    "value": 30,
-    "hue_low": 210,
-    "hue_high": 240
+    "saturation": 160,
+    "value": 70,
+    "hue_low": 180,
+    "hue_high": 220
   },
   "fit": {
     "recall_floor": 0.8,
     "red": {
-      "n": 38,
-      "worst": 0.824409,
-      "worst_stamp": "20261014T132549_255",
-      "median": 1.0
+      "n": 11,
+      "worst": 0.852953,
+      "worst_stamp": "20261115T102314_677",
+      "median": 0.997633
     },
     "blue": {
-      "n": 32,
-      "worst": 0.909651,
-      "worst_stamp": "20261014T134306_703",
-      "median": 1.0
+      "n": 6,
+      "worst": 0.815809,
+      "worst_stamp": "20261115T102240_572",
+      "median": 0.992857
     }
   }
 }
