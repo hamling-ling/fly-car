@@ -12,6 +12,7 @@ void setup() {
     Bridge.provide("setMotorSpeed", setMotorSpeed);
     Bridge.provide("showFace", showFace);
     Bridge.provide("showLamps", showLamps);
+    Bridge.provide("showFaceAndLamps", showFaceAndLamps);
     Monitor.println("Motor ready");
 }
 

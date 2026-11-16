@@ -68,6 +68,11 @@ void showLamps(int seeRed, int seeBlue, int goForward, int goBack) {
     live = true;
 }
 
+void showFaceAndLamps(std::vector<int> levels, int seeRed, int seeBlue, int goForward, int goBack) {
+    showFace(levels);
+    showLamps(seeRed, seeBlue, goForward, goBack);
+}
+
 void faceLoop() {
     if (!live) {
         return;

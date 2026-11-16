@@ -3,10 +3,12 @@
 間隔が 0.02 秒なら 20 ms 分である。遅れた更新は開いた時間ぶん、
 ただし 0.70 秒まで進める。パルスの引数はスケッチと同じく右、左。
 カメラの読み出しは別スレッドで、ここは最新の 1 枚だけを見る。
+顔の送信も別スレッドで、最新の 1 枚だけを送る。
 """
 
 from __future__ import annotations
 
+import threading
 import time
 
 import bootstrap
@@ -64,8 +66,11 @@ def publish_face(
 ) -> None:
     """Push one frame. A Bridge failure leaves the wheels on their last command."""
     right, left = sent
-    _call("showFace", frame(red_l, red_r, blue_l, blue_r, right, left, mode))
-    _call("showLamps", *lamps(red_l, red_r, blue_l, blue_r, right, left))
+    _call(
+        "showFaceAndLamps",
+        frame(red_l, red_r, blue_l, blue_r, right, left, mode),
+        *lamps(red_l, red_r, blue_l, blue_r, right, left),
+    )
 
 
 def _call(name: str, *args: object) -> None:
@@ -82,12 +87,62 @@ def _call(name: str, *args: object) -> None:
         _face_error = None
 
 
+class FacePublisher:
+    """Send face frames from its own thread, newest only.
+
+    The Bridge round trip is slow and the display can lag, so the loop only
+    leaves the newest frame here. A frame still waiting when a newer one
+    arrives is dropped, never queued.
+    """
+
+    def __init__(self) -> None:
+        self._condition = threading.Condition()
+        self._pending: tuple[float, float, float, float, tuple[int, int], str] | None = None
+        self._closed = False
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def offer(
+        self,
+        red_l: float,
+        red_r: float,
+        blue_l: float,
+        blue_r: float,
+        sent: tuple[int, int],
+        mode: str,
+    ) -> None:
+        with self._condition:
+            self._pending = (red_l, red_r, blue_l, blue_r, sent, mode)
+            self._condition.notify()
+
+    def close(self) -> None:
+        """Publish the last offered frame, then stop the thread."""
+        with self._condition:
+            self._closed = True
+            self._condition.notify()
+        self._thread.join()
+
+    def _run(self) -> None:
+        while True:
+            with self._condition:
+                while self._pending is None and not self._closed:
+                    self._condition.wait()
+                pending = self._pending
+                self._pending = None
+                if pending is None:
+                    return
+            began = time.monotonic()
+            publish_face(*pending)
+            _face_span.add(time.monotonic() - began)
+
+
 def loop() -> None:
     if not wait_until_bridge():
         raise SystemExit("マイコンに届かない")
     eye = Eye()
     plant = Plant()
     counts = Counts()
+    face_publisher = FacePublisher()
     shots = Shots(enabled=jpeg_enabled())
     try:
         eye.start()
@@ -184,13 +239,12 @@ def loop() -> None:
                         print(line)
             if counted:
                 red_l, red_r, blue_l, blue_r = counts.values
-                began = time.monotonic()
-                publish_face(red_l, red_r, blue_l, blue_r, last_sent, last_mode)
-                _face_span.add(time.monotonic() - began)
+                face_publisher.offer(red_l, red_r, blue_l, blue_r, last_sent, last_mode)
             time.sleep(0.002)
     finally:
         send(0, 0)
-        publish_face(0.0, 0.0, 0.0, 0.0, (0, 0), "stop")
+        face_publisher.offer(0.0, 0.0, 0.0, 0.0, (0, 0), "stop")
+        face_publisher.close()
         eye.close()
 
 

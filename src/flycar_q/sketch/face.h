@@ -8,3 +8,5 @@ void faceSetup();
 void faceLoop();
 void showFace(std::vector<int> levels);
 void showLamps(int seeRed, int seeBlue, int goForward, int goBack);
+// 顔とランプを 1 回の呼び出しでまとめて受ける。showFace と showLamps を続けて行う。
+void showFaceAndLamps(std::vector<int> levels, int seeRed, int seeBlue, int goForward, int goBack);
