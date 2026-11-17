@@ -59,7 +59,21 @@ def test_a_spin_uses_the_hinge_of_the_left_wheels_direction() -> None:
     assert straighten(160, -160) == (160, -124)
 
 
-def test_floor_runs_after_the_hinge() -> None:
+def test_forward_floor_is_judged_before_the_hinge() -> None:
     assert calibrated_command(160, 160) == (160, 101)
     assert calibrated_command(12, 12) == (0, 0)
-    assert calibrated_command(20, 20) == (20, left_magnitude(20, FORWARD))
+    assert calibrated_command(20, 20) == (20, 16)
+    assert calibrated_command(160, 12) == (160, 0)
+
+
+def test_a_matched_slow_pair_moves_both_wheels() -> None:
+    for matched in range(13, 17):
+        right, left = calibrated_command(matched, matched)
+        assert right == matched
+        assert left == 13
+    assert calibrated_command(17, 17) == (17, 13)
+
+
+def test_reverse_still_shifts_after_the_hinge() -> None:
+    assert calibrated_command(-1, -1) == (-37, -39)
+    assert calibrated_command(-100, -100) == (-136, -128)

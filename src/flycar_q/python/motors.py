@@ -1,7 +1,8 @@
 """Send wheel pulses to the sketch. Arguments are right, then left.
 
-The left command is read off the straight-line hinge, then each wheel is
-dropped to 0 when it is below the table start threshold. The returned pair
+Each forward wheel is dropped to 0 when its law pulse is below the table
+start threshold, then the left command is read off the straight-line hinge
+and held at that threshold if the hinge took it under. The returned pair
 is what was passed to setMotorSpeed.
 """
 

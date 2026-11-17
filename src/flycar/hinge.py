@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from flycar.pulse import PULSE_LIMIT, motion_pulse
+from flycar.pulse import FORWARD_START, PULSE_LIMIT, motion_pulse
 
 FORWARD_OFFSET = -3.1047767904
 FORWARD_SLOPE = 0.9428435978
@@ -77,6 +77,21 @@ def straighten(right: int, left: int) -> tuple[int, int]:
 
 
 def calibrated_command(right: int, left: int) -> tuple[int, int]:
-    """Straighten the left wheel, then apply ``motion_pulse``."""
+    """Judge the forward floor on the law's pulses, then straighten the left.
+
+    Both wheels are judged against ``FORWARD_START`` before the hinge, on the
+    pulse a matched pair of motors would be given. A forward pair below the
+    floor stops both wheels, and a pair at or above it moves both. The hinge
+    lowers the left pulse, so a left wheel that passed the floor is raised
+    back to ``FORWARD_START`` if the hinge took it under. Judging after the
+    hinge stopped only the left wheel for matched pulses 13..16, which
+    yawed the car toward the left on a slow start or stop. Reverse is
+    unchanged: the hinge, then the ``-REVERSE_START`` shift.
+    """
+    command = int(left)
+    if 0 < command < FORWARD_START:
+        return motion_pulse(right), 0
     right, left = straighten(right, left)
+    if command > 0 and left < FORWARD_START:
+        left = FORWARD_START
     return motion_pulse(right), motion_pulse(left)
