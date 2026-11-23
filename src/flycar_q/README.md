@@ -12,7 +12,7 @@ scripts/deploy_flycar_q.sh
 
 - 別のホストへ置くとき: `scripts/deploy_flycar_q.sh arduino@<ホスト名>.local`
 - スケッチを必ず作り直すとき: `--rebuild`
-- フレームの JPEG を書かずに起動するとき: `--no-jpeg`（`--rebuild` と一緒に付けられる）
+- フレームの JPEG を書くとき: `--jpeg`（`--rebuild` と一緒に付けられる）。付けない配置は書かない
 
 手で起動・停止するときは SSH で入る。起動コマンドはシェルに戻る。
 
@@ -275,7 +275,7 @@ sequenceDiagram
 
 `scripts/logs_flycar_q.sh` を Ctrl-C で止めると、ボードの `frames/` にある JPEG を `logs/flycar_q-日時/` へコピーし、コピーし終えたファイルをボードから消す。届いた大きさがボードと違うファイルは消さない。
 
-JPEG を書かずに走らせるには、アプリのディレクトリへ空ファイル `no-jpeg` を置いてから起動する。その走行は `frames/` を作らず、前の JPEG も消さず、ログに `img` を付けない。起動時のログは `camera: JPEG は書かない` である。ファイルを消して起動し直すと、また `frames/` へ書く。`scripts/deploy_flycar_q.sh --no-jpeg` は、コピーのあとでそのファイルを置いて起動する。このオプションの無い配置は、ボードに残っている `no-jpeg` を消してから起動する。手で切り替えるときは、SSH の先で `touch ~/ArduinoApps/flycar_q/no-jpeg` か `rm -f ~/ArduinoApps/flycar_q/no-jpeg` をしてから、止めて、起動する。
+アプリは、隣に空ファイル `no-jpeg` がある起動では `frames/` を作らず、前の JPEG も消さず、ログに `img` を付けない。起動時のログは `camera: JPEG は書かない` である。ファイルが無い起動は `frames/` へ書く。`scripts/deploy_flycar_q.sh` は、コピーのあとでそのファイルを置いてから起動する。`--jpeg` を付けると、ファイルを消してから起動する。手で切り替えるときは、SSH の先で `touch ~/ArduinoApps/flycar_q/no-jpeg` か `rm -f ~/ArduinoApps/flycar_q/no-jpeg` をしてから、止めて、起動する。
 
 ## LED マトリクス
 

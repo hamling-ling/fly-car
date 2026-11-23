@@ -15,12 +15,12 @@
 #
 #   scripts/deploy_flycar_q.sh
 #   scripts/deploy_flycar_q.sh --rebuild
-#   scripts/deploy_flycar_q.sh --no-jpeg
+#   scripts/deploy_flycar_q.sh --jpeg
 #   scripts/deploy_flycar_q.sh arduino@other.local
-#   scripts/deploy_flycar_q.sh --rebuild arduino@other.local
+#   scripts/deploy_flycar_q.sh --jpeg arduino@other.local
 #
-# --no-jpeg leaves an empty no-jpeg file next to the app and starts
-# without writing frames/. A start without that option removes the file.
+# The default leaves an empty no-jpeg file next to the app and starts
+# without writing frames/. --jpeg removes that file and writes frames/.
 #
 # Run from anywhere. The default matches research/camera_capture_q.
 
@@ -28,12 +28,12 @@ set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
 rebuild=0
-no_jpeg=0
+save_jpeg=0
 host=arduino@uno-q-1.local
 for arg in "$@"; do
   case "$arg" in
     --rebuild) rebuild=1 ;;
-    --no-jpeg) no_jpeg=1 ;;
+    --jpeg) save_jpeg=1 ;;
     -*)
       echo "unknown option: ${arg}" >&2
       exit 2
@@ -121,12 +121,12 @@ echo "remove leftover container ${host}:~/${remote}"
   docker ps -aq --filter name=flycar-q
 } | sort -u | xargs -r docker rm -f"
 
-if [[ "$no_jpeg" -eq 1 ]]; then
-  echo "jpeg off ${host}:~/${remote}/no-jpeg"
-  "${ssh[@]}" "$host" "touch ~/${remote}/no-jpeg"
-else
+if [[ "$save_jpeg" -eq 1 ]]; then
   echo "jpeg on ${host}:~/${remote}"
   "${ssh[@]}" "$host" "rm -f ~/${remote}/no-jpeg"
+else
+  echo "jpeg off ${host}:~/${remote}/no-jpeg"
+  "${ssh[@]}" "$host" "touch ~/${remote}/no-jpeg"
 fi
 
 echo "start ${host}:~/${remote}"
